@@ -56,9 +56,9 @@ jobs:
             # GitHub Secrets 내용으로 .env 파일 생성
             cat <<EOF > .env
             BATCH_PORT=${{ secrets.BATCH_PORT }}
-            SPRING_DATASOURCE_URL=${{ secrets.SPRING_DATASOURCE_URL }}
-            SPRING_DATASOURCE_USERNAME=${{ secrets.SPRING_DATASOURCE_USERNAME }}
-            SPRING_DATASOURCE_PASSWORD=${{ secrets.SPRING_DATASOURCE_PASSWORD }}
+            SPRING_DATASOURCE_URL=${{ secrets.SPRING_DB_URL }}
+            SPRING_DATASOURCE_USERNAME=${{ secrets.SPRING_DB_USERNAME }}
+            SPRING_DATASOURCE_PASSWORD=${{ secrets.SPRING_DB_PASSWORD }}
             KAKAO_REST_API_KEY=${{ secrets.KAKAO_REST_API_KEY }}
             EOF
 
