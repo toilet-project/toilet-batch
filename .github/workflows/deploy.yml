@@ -41,7 +41,7 @@ jobs:
           push: true
           tags: ${{ secrets.DOCKERHUB_USERNAME }}/toilet-batch:latest
 
-      # 6. 미니 PC에 SSH 접속하여 배포 실행
+      # 6. 미니 PC에 SSH 접속하여 배포 실행 (.env 자동 생성)
       - name: Deploy to Mini PC via SSH
         uses: appleboy/ssh-action@v1.0.3
         with:
@@ -52,6 +52,16 @@ jobs:
           script: |
             mkdir -p ~/toilet-batch
             cd ~/toilet-batch
+            
+            # GitHub Secrets 내용으로 .env 파일 생성
+            cat <<EOF > .env
+            BATCH_PORT=${{ secrets.BATCH_PORT }}
+            SPRING_DATASOURCE_URL=${{ secrets.SPRING_DATASOURCE_URL }}
+            SPRING_DATASOURCE_USERNAME=${{ secrets.SPRING_DATASOURCE_USERNAME }}
+            SPRING_DATASOURCE_PASSWORD=${{ secrets.SPRING_DATASOURCE_PASSWORD }}
+            KAKAO_REST_API_KEY=${{ secrets.KAKAO_REST_API_KEY }}
+            EOF
+
             docker compose pull
             docker compose up -d --build
             docker image prune -af --filter "until=24h"
