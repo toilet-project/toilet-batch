@@ -4,6 +4,9 @@ on:
   push:
     branches: [ "main" ]
 
+permissions:
+  contents: read
+
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
@@ -52,6 +55,23 @@ jobs:
           script: |
             mkdir -p ~/toilet-batch
             cd ~/toilet-batch
+
+            cat <<EOF > docker-compose.yml
+            services:
+              toilet-batch:
+                image: ${{ secrets.DOCKERHUB_USERNAME }}/toilet-batch:latest
+                container_name: toilet-batch
+                restart: always
+                env_file:
+                  - .env
+                networks:
+                  - toilet-network
+
+            networks:
+              toilet-network:
+                external: true
+            EOF
+
             docker compose pull
             docker compose up -d --build
             docker image prune -af --filter "until=24h"
