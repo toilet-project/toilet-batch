@@ -4,6 +4,9 @@ on:
   push:
     branches: [ "main" ]
 
+permissions:
+  contents: read
+
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
@@ -52,7 +55,7 @@ jobs:
           script: |
             mkdir -p ~/toilet-batch
             cd ~/toilet-batch
-            
+
             # GitHub Secrets 내용으로 .env 파일 생성
             cat <<EOF > .env
             BATCH_PORT=${{ secrets.BATCH_PORT }}
@@ -60,6 +63,22 @@ jobs:
             SPRING_DB_USERNAME=${{ secrets.SPRING_DB_USERNAME }}
             SPRING_DB_PASSWORD=${{ secrets.SPRING_DB_PASSWORD }}
             KAKAO_REST_API_KEY=${{ secrets.KAKAO_REST_API_KEY }}
+            EOF
+
+            cat <<EOF > docker-compose.yml
+            services:
+              toilet-batch:
+                image: ${{ secrets.DOCKERHUB_USERNAME }}/toilet-batch:latest
+                container_name: toilet-batch
+                restart: always
+                env_file:
+                  - .env
+                networks:
+                  - toilet-network
+
+            networks:
+              toilet-network:
+                external: true
             EOF
 
             docker compose pull
