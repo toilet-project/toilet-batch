@@ -29,12 +29,16 @@ class RestroomSyncServiceTest {
     @Mock
     private ToiletSyncWriter toiletSyncWriter;
 
+    @Mock
+    private IncrementalGeocodingService incrementalGeocodingService;
+
     @Test
     void synchronizesEveryPageAndAggregatesWriteResults() {
         LocalDateTime from = LocalDateTime.of(2026, 8, 22, 0, 0);
         LocalDateTime to = LocalDateTime.of(2026, 8, 25, 0, 0);
         when(apiClient.fetchPage(from, to, 1)).thenReturn(new PublicRestroomPage(List.of(record("A"), record("B")), 1, 100, 3));
         when(apiClient.fetchPage(from, to, 2)).thenReturn(new PublicRestroomPage(List.of(record("C")), 2, 100, 3));
+        when(incrementalGeocodingService.resolveAll(any())).thenReturn(List.of());
         when(toiletSyncWriter.upsertPage(any())).thenReturn(
                 new RestroomSyncWriteResult(1, 1, 0),
                 new RestroomSyncWriteResult(0, 1, 0)
@@ -59,6 +63,7 @@ class RestroomSyncServiceTest {
         LocalDateTime expectedTo = LocalDateTime.of(2026, 8, 25, 0, 0);
         when(apiClient.fetchPage(eq(expectedFrom), eq(expectedTo), eq(1)))
                 .thenReturn(new PublicRestroomPage(List.of(), 1, 100, 0));
+        when(incrementalGeocodingService.resolveAll(List.of())).thenReturn(List.of());
         when(toiletSyncWriter.upsertPage(List.of())).thenReturn(new RestroomSyncWriteResult(0, 0, 0));
 
         RestroomSyncResult result = serviceAt("2026-08-24T17:00:00Z").synchronizeRecentUpdates();
@@ -74,6 +79,7 @@ class RestroomSyncServiceTest {
         when(apiClient.fetchPage(from, to, 1))
                 .thenThrow(new IllegalStateException("temporary failure"))
                 .thenReturn(new PublicRestroomPage(List.of(), 1, 100, 0));
+        when(incrementalGeocodingService.resolveAll(List.of())).thenReturn(List.of());
         when(toiletSyncWriter.upsertPage(List.of())).thenReturn(new RestroomSyncWriteResult(0, 0, 0));
 
         RestroomSyncResult result = serviceAt("2026-08-25T02:00:00Z").synchronize(from, to);
@@ -85,7 +91,7 @@ class RestroomSyncServiceTest {
     private RestroomSyncService serviceAt(String instant) {
         RestroomSyncProperties properties = new RestroomSyncProperties("0 0 2 * * *", "Asia/Seoul", 3, 3);
         Clock clock = Clock.fixed(Instant.parse(instant), ZoneId.of("Asia/Seoul"));
-        return new RestroomSyncService(apiClient, toiletSyncWriter, properties, clock);
+        return new RestroomSyncService(apiClient, toiletSyncWriter, incrementalGeocodingService, properties, clock);
     }
 
     private PublicRestroomRecord record(String managementNumber) {
