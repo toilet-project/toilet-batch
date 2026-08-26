@@ -10,6 +10,7 @@ public record PublicRestroomRecord(
         String managementNumber,
         String name,
         String toiletType,
+        String ownershipType,
         String roadAddress,
         String jibunAddress,
         BigDecimal latitude,
