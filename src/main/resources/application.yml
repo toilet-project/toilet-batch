@@ -16,6 +16,8 @@ spring:
       hibernate:
         format_sql: true
         dialect: org.hibernate.dialect.MySQLDialect
-kakao:
-  api:
-    key: ${KAKAO_REST_API_KEY}
+public-data:
+  restroom:
+    base-url: https://apis.data.go.kr/1741000/public_restroom_info_v2
+    service-key: ${PUBLIC_DATA_API_KEY:}
+    page-size: 100
