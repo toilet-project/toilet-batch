@@ -12,6 +12,15 @@
 - 주소·좌표 등 조회에 필요한 데이터를 정제
 - 운영 MySQL의 화장실 데이터를 생성·갱신
 
+## 공공데이터 동기화
+
+- 대상 API: 공공데이터포털 `공중화장실정보 데이터 조회 /info_v2`
+- 조회 기준: 데이터 갱신시각 범위 `DAT_UPDT_PNT`의 **이상(from) · 미만(to)**, 즉 `[from, to)`
+- 요청 형식: JSON, 페이지당 최대 100건을 순회해 내부 `PublicRestroomRecord`로 변환
+- 다음 단계: 변환된 데이터를 MySQL에 생성·갱신하는 작업은 별도 배치 항목에서 연결합니다.
+
+배포 환경에는 공공데이터포털에서 발급한 일반 인증키를 `PUBLIC_DATA_API_KEY`로 등록해야 합니다. 키 값은 저장소나 `.env` 예시에 넣지 않습니다.
+
 ## 기술 및 실행 환경
 
 - Java 21 (Eclipse Temurin), Spring Boot, MySQL, Docker
