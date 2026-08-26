@@ -16,8 +16,21 @@ spring:
       hibernate:
         format_sql: true
         dialect: org.hibernate.dialect.MySQLDialect
+
+  task:
+    scheduling:
+      pool:
+        size: 1
+
 public-data:
   restroom:
     base-url: https://apis.data.go.kr/1741000/public_restroom_info_v2
     service-key: ${PUBLIC_DATA_API_KEY:}
     page-size: 100
+
+batch:
+  restroom-sync:
+    cron: "0 0 2 * * *"
+    zone: Asia/Seoul
+    overlap-days: 3
+    max-attempts: 3
