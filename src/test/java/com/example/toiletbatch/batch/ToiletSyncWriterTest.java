@@ -8,6 +8,8 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.example.toiletbatch.publicdata.PublicRestroomRecord;
+import java.math.BigDecimal;
+import java.time.LocalDateTime;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -34,11 +36,15 @@ class ToiletSyncWriterTest {
         verify(jdbcTemplate, times(3)).update(anyString(), any(Object[].class));
     }
 
-    private PublicRestroomRecord record(String managementNumber) {
-        return new PublicRestroomRecord(
+    private ResolvedRestroomRecord record(String managementNumber) {
+        PublicRestroomRecord restroom = new PublicRestroomRecord(
                 managementNumber, "테스트", "개방", "공중", "도로명", "지번", null, null,
                 1, 2, 0, 0, 0, 0, 3, 0, 0,
                 "기관", "042-000-0000", "상시", "", "202601", "Y", "입구", "Y", "Y", "벽면", "20260101", "20260101000000"
+        );
+        return new ResolvedRestroomRecord(
+                restroom, new BigDecimal("36.3500000"), new BigDecimal("127.3800000"),
+                "GEOCODED_ROAD", "a".repeat(64), LocalDateTime.of(2026, 8, 26, 2, 0)
         );
     }
 }

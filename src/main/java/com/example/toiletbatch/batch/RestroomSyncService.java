@@ -18,6 +18,7 @@ public class RestroomSyncService {
 
     private final PublicRestroomApiClient apiClient;
     private final ToiletSyncWriter toiletSyncWriter;
+    private final IncrementalGeocodingService incrementalGeocodingService;
     private final RestroomSyncProperties properties;
     private final Clock clock;
     private final ReentrantLock executionLock = new ReentrantLock();
@@ -26,19 +27,22 @@ public class RestroomSyncService {
     public RestroomSyncService(
             PublicRestroomApiClient apiClient,
             ToiletSyncWriter toiletSyncWriter,
+            IncrementalGeocodingService incrementalGeocodingService,
             RestroomSyncProperties properties
     ) {
-        this(apiClient, toiletSyncWriter, properties, Clock.system(properties.zoneId()));
+        this(apiClient, toiletSyncWriter, incrementalGeocodingService, properties, Clock.system(properties.zoneId()));
     }
 
     RestroomSyncService(
             PublicRestroomApiClient apiClient,
             ToiletSyncWriter toiletSyncWriter,
+            IncrementalGeocodingService incrementalGeocodingService,
             RestroomSyncProperties properties,
             Clock clock
     ) {
         this.apiClient = apiClient;
         this.toiletSyncWriter = toiletSyncWriter;
+        this.incrementalGeocodingService = incrementalGeocodingService;
         this.properties = properties;
         this.clock = clock;
     }
@@ -68,7 +72,9 @@ public class RestroomSyncService {
                 PublicRestroomPage page = fetchPageWithRetry(fromInclusive, toExclusive, pageNumber);
                 requestedPages++;
 
-                RestroomSyncWriteResult writeResult = toiletSyncWriter.upsertPage(page.records());
+                RestroomSyncWriteResult writeResult = toiletSyncWriter.upsertPage(
+                        incrementalGeocodingService.resolveAll(page.records())
+                );
                 receivedRecords += page.records().size();
                 insertedRecords += writeResult.insertedRecords();
                 updatedRecords += writeResult.updatedRecords();
