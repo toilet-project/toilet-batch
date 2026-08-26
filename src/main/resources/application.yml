@@ -28,6 +28,11 @@ public-data:
     service-key: ${PUBLIC_DATA_API_KEY:}
     page-size: 100
 
+kakao:
+  geocoding:
+    base-url: https://dapi.kakao.com
+    rest-api-key: ${KAKAO_REST_API_KEY:}
+
 batch:
   restroom-sync:
     cron: "0 0 2 * * *"

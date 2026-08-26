@@ -63,6 +63,7 @@ jobs:
             SPRING_DB_USERNAME=${{ secrets.SPRING_DB_USERNAME }}
             SPRING_DB_PASSWORD=${{ secrets.SPRING_DB_PASSWORD }}
             PUBLIC_DATA_API_KEY=${{ secrets.PUBLIC_DATA_API_KEY }}
+            KAKAO_REST_API_KEY=${{ secrets.KAKAO_REST_API_KEY }}
             EOF
 
             cat <<EOF > docker-compose.yml

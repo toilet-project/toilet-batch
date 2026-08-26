@@ -1,6 +1,5 @@
 package com.example.toiletbatch.batch;
 
-import com.example.toiletbatch.publicdata.PublicRestroomRecord;
 import java.util.List;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
@@ -21,6 +20,8 @@ public class ToiletSyncWriter {
                    open_time = ?, open_time_detail = ?, installation_date = ?, ownership_type = ?,
                    has_emergency_bell = ?, emergency_bell_location = ?, has_cctv = ?,
                    has_diaper_table = ?, diaper_table_location = ?, data_base_date = ?,
+                   latitude = ?, longitude = ?, coordinate_source = ?,
+                   geocoded_address_hash = ?, geocoded_at = ?,
                    data_source = 'PUBLIC_DATA'
              WHERE mng_no = ?
             """;
@@ -33,8 +34,8 @@ public class ToiletSyncWriter {
                 female_disabled_toilet_count, female_child_toilet_count, agency_name, phone_number,
                 open_time, open_time_detail, installation_date, ownership_type, has_emergency_bell,
                 emergency_bell_location, has_cctv, has_diaper_table, diaper_table_location,
-                data_base_date, data_source
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PUBLIC_DATA')
+                data_base_date, coordinate_source, geocoded_address_hash, geocoded_at, data_source
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PUBLIC_DATA')
             """;
 
     private final JdbcTemplate jdbcTemplate;
@@ -44,30 +45,32 @@ public class ToiletSyncWriter {
     }
 
     @Transactional
-    public RestroomSyncWriteResult upsertPage(List<PublicRestroomRecord> records) {
+    public RestroomSyncWriteResult upsertPage(List<ResolvedRestroomRecord> records) {
         int inserted = 0;
         int updated = 0;
         int skipped = 0;
 
-        for (PublicRestroomRecord record : records) {
+        for (ResolvedRestroomRecord resolvedRecord : records) {
+            var record = resolvedRecord.restroom();
             if (!StringUtils.hasText(record.managementNumber())) {
                 skipped++;
                 continue;
             }
 
-            int affectedRows = jdbcTemplate.update(UPDATE_SQL, updateArguments(record));
+            int affectedRows = jdbcTemplate.update(UPDATE_SQL, updateArguments(resolvedRecord));
             if (affectedRows > 0) {
                 updated++;
                 continue;
             }
 
-            jdbcTemplate.update(INSERT_SQL, insertArguments(record));
+            jdbcTemplate.update(INSERT_SQL, insertArguments(resolvedRecord));
             inserted++;
         }
         return new RestroomSyncWriteResult(inserted, updated, skipped);
     }
 
-    private Object[] updateArguments(PublicRestroomRecord record) {
+    private Object[] updateArguments(ResolvedRestroomRecord resolvedRecord) {
+        var record = resolvedRecord.restroom();
         return new Object[]{
                 record.name(), record.toiletType(), record.roadAddress(), record.jibunAddress(),
                 record.maleToiletCount(), record.maleUrinalCount(),
@@ -77,20 +80,24 @@ public class ToiletSyncWriter {
                 record.agencyName(), record.phoneNumber(), record.openTime(), record.openTimeDetail(),
                 record.installationDate(), record.ownershipType(), record.hasEmergencyBell(),
                 record.emergencyBellLocation(), record.hasCctv(), record.hasDiaperTable(),
-                record.diaperTableLocation(), record.dataBaseDate(), record.managementNumber()
+                record.diaperTableLocation(), record.dataBaseDate(), resolvedRecord.latitude(), resolvedRecord.longitude(),
+                resolvedRecord.coordinateSource(), resolvedRecord.geocodedAddressHash(), resolvedRecord.geocodedAt(),
+                record.managementNumber()
         };
     }
 
-    private Object[] insertArguments(PublicRestroomRecord record) {
+    private Object[] insertArguments(ResolvedRestroomRecord resolvedRecord) {
+        var record = resolvedRecord.restroom();
         return new Object[]{
                 record.managementNumber(), record.name(), record.toiletType(), record.roadAddress(),
-                record.jibunAddress(), record.latitude(), record.longitude(), record.maleToiletCount(),
+                record.jibunAddress(), resolvedRecord.latitude(), resolvedRecord.longitude(), record.maleToiletCount(),
                 record.maleUrinalCount(), record.maleDisabledToiletCount(), record.maleDisabledUrinalCount(),
                 record.maleChildToiletCount(), record.maleChildUrinalCount(), record.femaleToiletCount(),
                 record.femaleDisabledToiletCount(), record.femaleChildToiletCount(), record.agencyName(),
                 record.phoneNumber(), record.openTime(), record.openTimeDetail(), record.installationDate(),
                 record.ownershipType(), record.hasEmergencyBell(), record.emergencyBellLocation(),
-                record.hasCctv(), record.hasDiaperTable(), record.diaperTableLocation(), record.dataBaseDate()
+                record.hasCctv(), record.hasDiaperTable(), record.diaperTableLocation(), record.dataBaseDate(),
+                resolvedRecord.coordinateSource(), resolvedRecord.geocodedAddressHash(), resolvedRecord.geocodedAt()
         };
     }
 }
