@@ -10,16 +10,16 @@ public class RestroomSyncScheduler {
 
     private static final Logger log = LoggerFactory.getLogger(RestroomSyncScheduler.class);
 
-    private final RestroomSyncService restroomSyncService;
+    private final RestroomSyncExecutionService restroomSyncExecutionService;
 
-    public RestroomSyncScheduler(RestroomSyncService restroomSyncService) {
-        this.restroomSyncService = restroomSyncService;
+    public RestroomSyncScheduler(RestroomSyncExecutionService restroomSyncExecutionService) {
+        this.restroomSyncExecutionService = restroomSyncExecutionService;
     }
 
     @Scheduled(cron = "${batch.restroom-sync.cron}", zone = "${batch.restroom-sync.zone}")
     public void synchronizeDaily() {
         try {
-            RestroomSyncResult result = restroomSyncService.synchronizeRecentUpdates();
+            RestroomSyncResult result = restroomSyncExecutionService.synchronizeRecentUpdates(BatchSyncTrigger.SCHEDULED);
             log.info(
                     "공중화장실 동기화 완료: range=[{}, {}), pages={}, received={}, inserted={}, updated={}, skipped={}",
                     result.fromInclusive(), result.toExclusive(), result.requestedPages(), result.receivedRecords(),

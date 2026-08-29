@@ -17,6 +17,10 @@ spring:
         format_sql: true
         dialect: org.hibernate.dialect.MySQLDialect
 
+  sql:
+    init:
+      mode: always
+
   task:
     scheduling:
       pool:

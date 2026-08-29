@@ -20,21 +20,21 @@ public class RestroomSyncStartupRunner implements ApplicationRunner {
 
     private static final Logger log = LoggerFactory.getLogger(RestroomSyncStartupRunner.class);
 
-    private final RestroomSyncService restroomSyncService;
+    private final RestroomSyncExecutionService restroomSyncExecutionService;
     private final ConfigurableApplicationContext applicationContext;
 
     public RestroomSyncStartupRunner(
-            RestroomSyncService restroomSyncService,
+            RestroomSyncExecutionService restroomSyncExecutionService,
             ConfigurableApplicationContext applicationContext
     ) {
-        this.restroomSyncService = restroomSyncService;
+        this.restroomSyncExecutionService = restroomSyncExecutionService;
         this.applicationContext = applicationContext;
     }
 
     @Override
     public void run(ApplicationArguments args) {
         try {
-            RestroomSyncResult result = restroomSyncService.synchronizeRecentUpdates();
+            RestroomSyncResult result = restroomSyncExecutionService.synchronizeRecentUpdates(BatchSyncTrigger.MANUAL);
             log.info(
                     "수동 공중화장실 동기화 완료: range=[{}, {}), pages={}, received={}, inserted={}, updated={}, skipped={}",
                     result.fromInclusive(), result.toExclusive(), result.requestedPages(), result.receivedRecords(),
