@@ -59,8 +59,14 @@ public class PublicRestroomResponseParser {
         }
 
         String resultCode = text(header, "resultCode", "resultCd");
-        if (!resultCode.isBlank() && !"00".equals(resultCode) && !"NORMAL_SERVICE".equals(resultCode)) {
-            throw new PublicDataApiException("공공데이터 API 호출 실패: " + text(header, "resultMsg", "resultMessage"));
+        if (!resultCode.isBlank()
+                && !"00".equals(resultCode)
+                && !"NORMAL_SERVICE".equals(resultCode)
+                && !"정상".equals(resultCode)) {
+            throw new PublicDataApiException(
+                    "공공데이터 API 호출 실패 (resultCode=" + resultCode + "): "
+                            + text(header, "resultMsg", "resultMessage")
+            );
         }
     }
 

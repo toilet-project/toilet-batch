@@ -31,3 +31,12 @@
 
 `main` 반영 시 GitHub Actions가 Docker 이미지를 빌드한 뒤 Mini PC 배치 컨테이너를 갱신합니다.
 자세한 운영 절차는 [운영 문서](https://github.com/toilet-project/docs/blob/main/operations.md)를 참고하세요.
+
+### 수동 동기화
+
+장애 복구나 최초 검증이 필요할 때는 Mini PC 내부에서만 아래 환경 변수를 지정해 최근 `overlap-days`(기본 3일) 범위를 한 번 동기화할 수 있습니다.
+
+- `BATCH_RESTROOM_SYNC_RUN_ON_STARTUP=true`
+- `SPRING_MAIN_WEB_APPLICATION_TYPE=none`
+
+이 실행 방식은 HTTP API를 노출하지 않으며, 완료 후 프로세스가 종료됩니다.
