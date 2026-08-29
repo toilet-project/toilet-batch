@@ -28,4 +28,24 @@ class PublicRestroomResponseParserTest {
         assertEquals(0, page.totalCount());
         assertEquals(0, page.records().size());
     }
+
+    @Test
+    void acceptsZeroSuccessResultCodeReturnedByThePublicDataApi() {
+        PublicRestroomPage page = parser.parse("""
+                {
+                  "response": {
+                    "header": { "resultCode": "0", "resultMsg": "정상" },
+                    "body": {
+                      "items": { "item": [] },
+                      "pageNo": 1,
+                      "numOfRows": 100,
+                      "totalCount": 0
+                    }
+                  }
+                }
+                """);
+
+        assertEquals(0, page.totalCount());
+        assertEquals(0, page.records().size());
+    }
 }
