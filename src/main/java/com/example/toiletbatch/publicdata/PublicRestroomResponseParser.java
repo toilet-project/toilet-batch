@@ -61,6 +61,7 @@ public class PublicRestroomResponseParser {
         String resultCode = text(header, "resultCode", "resultCd");
         if (!resultCode.isBlank()
                 && !"00".equals(resultCode)
+                && !"0".equals(resultCode)
                 && !"NORMAL_SERVICE".equals(resultCode)
                 && !"정상".equals(resultCode)) {
             throw new PublicDataApiException(
