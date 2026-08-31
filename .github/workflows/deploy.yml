@@ -64,6 +64,7 @@ jobs:
             SPRING_DB_PASSWORD=${{ secrets.SPRING_DB_PASSWORD }}
             PUBLIC_DATA_API_KEY=${{ secrets.PUBLIC_DATA_API_KEY }}
             KAKAO_REST_API_KEY=${{ secrets.KAKAO_REST_API_KEY }}
+            BATCH_FAILURE_WEBHOOK_URL=${{ secrets.BATCH_FAILURE_WEBHOOK_URL }}
             EOF
 
             cat <<EOF > docker-compose.yml
@@ -71,11 +72,16 @@ jobs:
               toilet-batch:
                 image: ${{ secrets.DOCKERHUB_USERNAME }}/toilet-batch:latest
                 container_name: toilet-batch
-                restart: always
+                restart: unless-stopped
                 env_file:
                   - .env
                 networks:
                   - toilet-network
+                logging:
+                  driver: json-file
+                  options:
+                    max-size: "10m"
+                    max-file: "5"
 
             networks:
               toilet-network:
