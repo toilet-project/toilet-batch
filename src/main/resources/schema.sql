@@ -1,0 +1,21 @@
+CREATE TABLE IF NOT EXISTS batch_sync_history (
+    id BIGINT NOT NULL AUTO_INCREMENT,
+    job_name VARCHAR(100) NOT NULL,
+    trigger_type VARCHAR(30) NOT NULL,
+    status VARCHAR(20) NOT NULL,
+    range_from DATETIME NOT NULL,
+    range_to DATETIME NOT NULL,
+    requested_pages INT NOT NULL DEFAULT 0,
+    received_records INT NOT NULL DEFAULT 0,
+    inserted_records INT NOT NULL DEFAULT 0,
+    updated_records INT NOT NULL DEFAULT 0,
+    skipped_records INT NOT NULL DEFAULT 0,
+    failed_records INT NOT NULL DEFAULT 0,
+    total_toilet_count BIGINT NULL,
+    started_at DATETIME NOT NULL,
+    completed_at DATETIME NOT NULL,
+    error_message VARCHAR(1000) NULL,
+    PRIMARY KEY (id),
+    INDEX idx_batch_sync_history_started_at (started_at),
+    INDEX idx_batch_sync_history_status_started_at (status, started_at)
+);

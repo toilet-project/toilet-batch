@@ -10,16 +10,21 @@ public class RestroomSyncScheduler {
 
     private static final Logger log = LoggerFactory.getLogger(RestroomSyncScheduler.class);
 
-    private final RestroomSyncService restroomSyncService;
+    private final RestroomSyncExecutionService restroomSyncExecutionService;
+    private final BatchFailureNotifier batchFailureNotifier;
 
-    public RestroomSyncScheduler(RestroomSyncService restroomSyncService) {
-        this.restroomSyncService = restroomSyncService;
+    public RestroomSyncScheduler(
+            RestroomSyncExecutionService restroomSyncExecutionService,
+            BatchFailureNotifier batchFailureNotifier
+    ) {
+        this.restroomSyncExecutionService = restroomSyncExecutionService;
+        this.batchFailureNotifier = batchFailureNotifier;
     }
 
     @Scheduled(cron = "${batch.restroom-sync.cron}", zone = "${batch.restroom-sync.zone}")
     public void synchronizeDaily() {
         try {
-            RestroomSyncResult result = restroomSyncService.synchronizeRecentUpdates();
+            RestroomSyncResult result = restroomSyncExecutionService.synchronizeRecentUpdates(BatchSyncTrigger.SCHEDULED);
             log.info(
                     "공중화장실 동기화 완료: range=[{}, {}), pages={}, received={}, inserted={}, updated={}, skipped={}",
                     result.fromInclusive(), result.toExclusive(), result.requestedPages(), result.receivedRecords(),
@@ -27,6 +32,7 @@ public class RestroomSyncScheduler {
             );
         } catch (RuntimeException exception) {
             log.error("공중화장실 일일 동기화에 실패했습니다.", exception);
+            batchFailureNotifier.notifyFailure(exception);
         }
     }
 }
