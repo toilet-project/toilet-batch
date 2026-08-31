@@ -1,6 +1,7 @@
 package com.example.toiletbatch.batch;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -12,6 +13,8 @@ import com.example.toiletbatch.publicdata.PublicRestroomRecord;
 import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Optional;
@@ -67,6 +70,26 @@ class IncrementalGeocodingServiceTest {
         assertEquals("ADMIN_CONFIRMED", result.coordinateSource());
         assertEquals(new BigDecimal("35.0000000"), result.latitude());
         verify(geocodingClient, never()).geocode(anyString());
+    }
+
+    @Test
+    void productionClockRecordsGeocodingTimeInConfiguredZone() {
+        when(metadataRepository.findByManagementNumber("KST")).thenReturn(Optional.empty());
+        when(geocodingClient.geocode("대전 유성구 대학로 99"))
+                .thenReturn(Optional.of(new Coordinate(new BigDecimal("36.3620000"), new BigDecimal("127.3440000"))));
+        RestroomSyncProperties properties = new RestroomSyncProperties(null, "Asia/Seoul", 3, 3);
+        IncrementalGeocodingService service = new IncrementalGeocodingService(
+                metadataRepository, geocodingClient, properties
+        );
+        LocalDateTime before = LocalDateTime.now(ZoneId.of("Asia/Seoul"));
+
+        ResolvedRestroomRecord result = service.resolveAll(
+                List.of(record("KST", "대전 유성구 대학로 99", "궁동 1"))
+        ).getFirst();
+
+        LocalDateTime after = LocalDateTime.now(ZoneId.of("Asia/Seoul"));
+        assertFalse(result.geocodedAt().isBefore(before));
+        assertFalse(result.geocodedAt().isAfter(after));
     }
 
     private IncrementalGeocodingService service() {

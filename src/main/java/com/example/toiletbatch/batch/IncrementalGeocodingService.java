@@ -31,9 +31,10 @@ class IncrementalGeocodingService {
     @Autowired
     public IncrementalGeocodingService(
             ToiletCoordinateMetadataRepository metadataRepository,
-            KakaoAddressGeocodingClient geocodingClient
+            KakaoAddressGeocodingClient geocodingClient,
+            RestroomSyncProperties syncProperties
     ) {
-        this(metadataRepository, geocodingClient, Clock.systemDefaultZone());
+        this(metadataRepository, geocodingClient, Clock.system(syncProperties.zoneId()));
     }
 
     IncrementalGeocodingService(
