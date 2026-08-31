@@ -11,7 +11,7 @@ spring:
   jpa:
     hibernate:
       ddl-auto: update
-    show-sql: true
+    show-sql: false
     properties:
       hibernate:
         format_sql: true
@@ -43,3 +43,17 @@ batch:
     zone: Asia/Seoul
     overlap-days: 3
     max-attempts: 3
+  notification:
+    webhook-url: ${BATCH_FAILURE_WEBHOOK_URL:}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  endpoint:
+    health:
+      show-details: never
+  metrics:
+    tags:
+      application: toilet-batch
