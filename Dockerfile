@@ -9,4 +9,4 @@ ARG JAR_FILE=build/libs/*-SNAPSHOT.jar
 COPY ${JAR_FILE} app.jar
 
 # 애플리케이션 실행
-ENTRYPOINT ["java", "-jar", "app.jar"]
+ENTRYPOINT ["java", "-Duser.timezone=Asia/Seoul", "-jar", "app.jar"]
