@@ -30,6 +30,15 @@ public class KakaoAddressGeocodingClient {
     }
 
     public Optional<Coordinate> geocode(String address) {
+        return request(address, false);
+    }
+
+    /** Normalization must not silently pick the first of several address candidates. */
+    public Optional<Coordinate> geocodeUnique(String address) {
+        return request(address, true);
+    }
+
+    private Optional<Coordinate> request(String address, boolean unique) {
         if (!StringUtils.hasText(properties.restApiKey())) {
             throw new IllegalStateException("KAKAO_REST_API_KEY 환경 변수가 설정되지 않았습니다.");
         }
@@ -47,13 +56,17 @@ public class KakaoAddressGeocodingClient {
                 .retrieve()
                 .body(String.class);
 
-        return parseFirstCoordinate(response);
+        return parseFirstCoordinate(response, unique);
     }
 
-    private Optional<Coordinate> parseFirstCoordinate(String response) {
+    private Optional<Coordinate> parseFirstCoordinate(String response, boolean unique) {
         try {
-            JsonNode documents = objectMapper.readTree(response).path("documents");
+            JsonNode root = objectMapper.readTree(response);
+            JsonNode documents = root.path("documents");
             if (!documents.isArray() || documents.isEmpty()) {
+                return Optional.empty();
+            }
+            if (unique && (documents.size() != 1 || root.path("meta").path("total_count").asInt(-1) != 1)) {
                 return Optional.empty();
             }
             JsonNode document = documents.get(0);

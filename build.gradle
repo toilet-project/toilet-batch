@@ -47,3 +47,9 @@ dependencies {
 tasks.named('test') {
     useJUnitPlatform()
 }
+
+// Isolated read-only-by-default administrative region analysis, not the normal batch application.
+tasks.register('regionNormalize', JavaExec) {
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'com.example.toiletbatch.region.RegionNormalizationCli'
+}

@@ -73,6 +73,18 @@ class IncrementalGeocodingServiceTest {
     }
 
     @Test
+    void addressOnlyEditDoesNotMoveExistingCoordinate() {
+        CoordinateMetadata existing = new CoordinateMetadata(
+                "기존 주소", "기존 지번", new BigDecimal("35.0000000"), new BigDecimal("127.0000000"),
+                "GEOCODED_LEGACY", "a".repeat(64), null);
+        when(metadataRepository.findByManagementNumber("A")).thenReturn(Optional.of(existing));
+        ResolvedRestroomRecord result = service().resolveAll(List.of(record("A", "주소 오타 수정", "기존 지번"))).getFirst();
+        assertEquals(existing.latitude(), result.latitude());
+        assertEquals(existing.longitude(), result.longitude());
+        verify(geocodingClient, never()).geocode(anyString());
+    }
+
+    @Test
     void productionClockRecordsGeocodingTimeInConfiguredZone() {
         when(metadataRepository.findByManagementNumber("KST")).thenReturn(Optional.empty());
         when(geocodingClient.geocode("대전 유성구 대학로 99"))
