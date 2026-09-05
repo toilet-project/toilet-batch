@@ -1,5 +1,7 @@
 HELP.md
 .env
+region-results/
+*.region.jsonl
 .gradle
 build/
 !gradle/wrapper/gradle-wrapper.jar

@@ -91,11 +91,9 @@ class IncrementalGeocodingService {
     }
 
     private boolean requiresGeocoding(PublicRestroomRecord record, CoordinateMetadata metadata) {
-        if (metadata.latitude() == null || metadata.longitude() == null || GEOCODE_FAILED.equals(metadata.source())) {
-            return true;
-        }
-        return !addressHash(record.roadAddress(), record.jibunAddress())
-                .equals(addressHash(metadata.roadAddress(), metadata.jibunAddress()));
+        // Address edits alone are not permission to move a toilet. Existing coordinates are preserved,
+        // including suspicious ones; normalization reports discrepancies for human confirmation.
+        return metadata.latitude() == null && metadata.longitude() == null;
     }
 
     private Optional<Coordinate> geocodeIfPresent(String address) {
