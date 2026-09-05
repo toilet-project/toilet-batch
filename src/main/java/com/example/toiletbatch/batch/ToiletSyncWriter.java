@@ -11,7 +11,9 @@ public class ToiletSyncWriter {
 
     private static final String UPDATE_SQL = """
             UPDATE toilet
-               SET name = ?, toilet_type = ?, road_address = ?, jibun_address = ?,
+               SET name = ?, toilet_type = ?,
+                   road_address = CASE WHEN coordinate_source = 'ADMIN_CONFIRMED' THEN road_address ELSE ? END,
+                   jibun_address = CASE WHEN coordinate_source = 'ADMIN_CONFIRMED' THEN jibun_address ELSE ? END,
                    male_toilet_count = ?, male_urinal_count = ?,
                    male_disabled_toilet_count = ?, male_disabled_urinal_count = ?,
                    male_child_toilet_count = ?, male_child_urinal_count = ?,
@@ -20,8 +22,6 @@ public class ToiletSyncWriter {
                    open_time = ?, open_time_detail = ?, installation_date = ?, ownership_type = ?,
                    has_emergency_bell = ?, emergency_bell_location = ?, has_cctv = ?,
                    has_diaper_table = ?, diaper_table_location = ?, data_base_date = ?,
-                   latitude = ?, longitude = ?, coordinate_source = ?,
-                   geocoded_address_hash = ?, geocoded_at = ?,
                    data_source = 'PUBLIC_DATA'
              WHERE mng_no = ?
             """;
@@ -40,6 +40,13 @@ public class ToiletSyncWriter {
 
     private final JdbcTemplate jdbcTemplate;
 
+    private static final String FILL_MISSING_COORDINATE_SQL = """
+            UPDATE toilet SET latitude = ?, longitude = ?, coordinate_source = ?,
+                geocoded_address_hash = ?, geocoded_at = ?
+            WHERE mng_no = ? AND latitude IS NULL AND longitude IS NULL
+                AND coordinate_source <> 'ADMIN_CONFIRMED'
+            """;
+
     public ToiletSyncWriter(JdbcTemplate jdbcTemplate) {
         this.jdbcTemplate = jdbcTemplate;
     }
@@ -57,6 +64,11 @@ public class ToiletSyncWriter {
                 continue;
             }
 
+            // A correction can commit after the metadata read. Never overwrite existing coordinates
+            // with that stale snapshot; only genuinely empty pairs may be filled by the batch.
+            jdbcTemplate.update(FILL_MISSING_COORDINATE_SQL, resolvedRecord.latitude(), resolvedRecord.longitude(),
+                    resolvedRecord.coordinateSource(), resolvedRecord.geocodedAddressHash(),
+                    resolvedRecord.geocodedAt(), record.managementNumber());
             int affectedRows = jdbcTemplate.update(UPDATE_SQL, updateArguments(resolvedRecord));
             if (affectedRows > 0) {
                 updated++;
@@ -80,8 +92,7 @@ public class ToiletSyncWriter {
                 record.agencyName(), record.phoneNumber(), record.openTime(), record.openTimeDetail(),
                 record.installationDate(), record.ownershipType(), record.hasEmergencyBell(),
                 record.emergencyBellLocation(), record.hasCctv(), record.hasDiaperTable(),
-                record.diaperTableLocation(), record.dataBaseDate(), resolvedRecord.latitude(), resolvedRecord.longitude(),
-                resolvedRecord.coordinateSource(), resolvedRecord.geocodedAddressHash(), resolvedRecord.geocodedAt(),
+                record.diaperTableLocation(), record.dataBaseDate(),
                 record.managementNumber()
         };
     }

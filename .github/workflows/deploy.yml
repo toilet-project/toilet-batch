@@ -7,6 +7,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: toilet-batch-production
+  cancel-in-progress: false
+
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
@@ -55,6 +59,7 @@ jobs:
           script: |
             mkdir -p ~/toilet-batch
             cd ~/toilet-batch
+            mkdir -p region-results
 
             # GitHub Secrets 내용으로 .env 파일 생성
             cat <<EOF > .env
@@ -65,6 +70,11 @@ jobs:
             PUBLIC_DATA_API_KEY=${{ secrets.PUBLIC_DATA_API_KEY }}
             KAKAO_REST_API_KEY=${{ secrets.KAKAO_REST_API_KEY }}
             BATCH_FAILURE_WEBHOOK_URL=${{ secrets.BATCH_FAILURE_WEBHOOK_URL }}
+            BATCH_REGION_ENABLED=${{ vars.BATCH_REGION_ENABLED || 'false' }}
+            REGION_JOURNAL_PATH=/var/lib/toilet-region/normalization.region.jsonl
+            REGION_DAILY_CALL_BUDGET=${{ vars.REGION_DAILY_CALL_BUDGET || '1000' }}
+            REGION_DELAY_MS=${{ vars.REGION_DELAY_MS || '1000' }}
+            REGION_MAX_ITEMS=${{ vars.REGION_MAX_ITEMS || '100' }}
             EOF
 
             cat <<EOF > docker-compose.yml
@@ -75,6 +85,8 @@ jobs:
                 restart: unless-stopped
                 env_file:
                   - .env
+                volumes:
+                  - ./region-results:/var/lib/toilet-region
                 networks:
                   - toilet-network
                 logging:
@@ -88,6 +100,6 @@ jobs:
                 external: true
             EOF
 
-            docker compose pull
-            docker compose up -d --build
-            docker image prune -af --filter "until=24h"
+            docker compose -f docker-compose.yml pull
+            docker compose -f docker-compose.yml up -d
+            docker image prune -f --filter "until=24h"
