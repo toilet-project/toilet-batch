@@ -30,3 +30,15 @@ test('reject unsafe dotenv values and malformed encryption keys', () => {
   for (const value of ['null','[]','{}','bad','{"k1":"short"}']) assert.throws(() => prepare({...base,ERASURE_LEDGER_KEYS_JSON:value},'api'))
   assert.throws(() => prepare({...base,ERASURE_LEDGER_ENDPOINT:'https://evil.example'},'api'))
 })
+
+test('checkpoint secret transport remains paused and validates identity', () => {
+  const token = 'github_pat_' + 'a'.repeat(40)
+  const result = prepare({...base,ERASURE_CHECKPOINT_GITHUB_TOKEN:token,
+    ERASURE_CHECKPOINT_DATABASE_EPOCH:'22222222-2222-2222-2222-222222222222'},'batch')
+  const decoded = Buffer.from(result.payload,'base64').toString()
+  assert.ok(decoded.includes("ERASURE_CHECKPOINT_GITHUB_TOKEN='"+token+"'"))
+  assert.ok(decoded.includes("ERASURE_CHECKPOINT_ENABLED='false'"))
+  assert.throws(() => prepare({...base,ERASURE_CHECKPOINT_ENABLED:'true'},'batch'))
+  assert.throws(() => prepare({...base,ERASURE_CHECKPOINT_GITHUB_TOKEN:'bad\ntoken'},'batch'))
+  assert.throws(() => prepare({...base,ERASURE_CHECKPOINT_DATABASE_EPOCH:'unknown'},'batch'))
+})

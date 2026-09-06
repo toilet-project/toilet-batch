@@ -7,7 +7,7 @@ import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.model.*;
 
 /** Write-once intent, verified by authenticated read-back. Errors never include record/credential content. */
-public final class R2ErasureLedger implements ErasureLedger {
+public final class R2ErasureLedger implements CheckpointedErasureLedger.SnapshotLedger {
     private final S3Client s3;
     private final ErasureCipher cipher;
     private final String bucket;
@@ -61,6 +61,14 @@ public final class R2ErasureLedger implements ErasureLedger {
     }
 
     private List<ErasureRecord> readSnapshot(int expectedObjects, boolean catalogue) {
+        var records = readBounded(expectedObjects, catalogue);
+        if (records.size() != expectedObjects) throw unavailable();
+        return records;
+    }
+    @Override public List<ErasureRecord> catalogueAtMost(int maximum) { return readBounded(maximum, true); }
+    @Override public List<ErasureRecord> intentsAtMost(int maximum) { return readBounded(maximum, false); }
+
+    private List<ErasureRecord> readBounded(int expectedObjects, boolean catalogue) {
         if (expectedObjects < 0 || expectedObjects > 1000000) throw unavailable();
         try {
             var records = new ArrayList<ErasureRecord>();
@@ -82,7 +90,6 @@ public final class R2ErasureLedger implements ErasureLedger {
                 if (Boolean.TRUE.equals(page.isTruncated()) && (token == null || token.isBlank())) throw unavailable();
                 if (token != null && !seenTokens.add(token)) throw unavailable();
             } while (token != null);
-            if (records.size() != expectedObjects) throw unavailable();
             return List.copyOf(records);
         } catch (RuntimeException ignored) { throw unavailable(); }
     }

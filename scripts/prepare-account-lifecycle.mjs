@@ -40,6 +40,14 @@ export function prepare(e, role) {
     }
   }
   config.ERASURE_LEDGER_KEYS_JSON = keys ? JSON.stringify(keys) : ''
+  if (e.ERASURE_CHECKPOINT_ENABLED && e.ERASURE_CHECKPOINT_ENABLED !== 'false') fail('LIFECYCLE_ACTIVATION_NOT_APPROVED')
+  config.ERASURE_CHECKPOINT_ENABLED = 'false'
+  config.ERASURE_CHECKPOINT_GITHUB_TOKEN = safe(e.ERASURE_CHECKPOINT_GITHUB_TOKEN)
+  config.ERASURE_CHECKPOINT_DATABASE_EPOCH = safe(e.ERASURE_CHECKPOINT_DATABASE_EPOCH)
+  if (config.ERASURE_CHECKPOINT_GITHUB_TOKEN && !/^[A-Za-z0-9_]{20,255}$/.test(config.ERASURE_CHECKPOINT_GITHUB_TOKEN))
+    fail('LIFECYCLE_INVALID_CHECKPOINT_TOKEN')
+  if (config.ERASURE_CHECKPOINT_DATABASE_EPOCH && !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(config.ERASURE_CHECKPOINT_DATABASE_EPOCH))
+    fail('LIFECYCLE_INVALID_CHECKPOINT_EPOCH')
   if (role === 'api' && !config.REDIS_PASSWORD) fail('LIFECYCLE_API_REDIS_REQUIRED')
   // Single-quoted Compose dotenv prevents interpolation; transport is base64, never shell-interpreted JSON.
   const dotenv = Object.entries(config).map(([k,v]) => k + "='" + safe(v) + "'").join('\n') + '\n'

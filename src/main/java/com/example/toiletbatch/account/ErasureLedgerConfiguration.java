@@ -9,5 +9,7 @@ import org.springframework.core.env.Environment;
 @Configuration
 public class ErasureLedgerConfiguration {
     @Bean(destroyMethod = "close")
-    public ErasureLedger erasureLedger(Environment env) { return ErasureLedgerFactory.create(env); }
+    public ErasureLedger erasureLedger(Environment env, org.springframework.jdbc.core.JdbcTemplate jdbc) {
+        return com.geupddong.account.ProtectedErasureLedgerFactory.create(env, jdbc);
+    }
 }
