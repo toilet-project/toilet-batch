@@ -38,6 +38,7 @@ public record BackupEvidenceInventory(Instant scannedAt, List<Entry> files, int 
                     if (++count > 20000) throw invalid();
                     String name = file.getFileName().toString();
                     if (!Files.isRegularFile(file, LinkOption.NOFOLLOW_LINKS)) { unknown++; continue; }
+                    if (name.equals(".backup.lock") && Files.size(file) == 0) continue;
                     if (name.matches("toilet-db-[0-9]{8}-[0-9]{6}\\.sql\\.gz\\.enc\\.metadata\\.json")) {
                         manifests.add(name.substring(0, name.length() - 14)); continue;
                     }
