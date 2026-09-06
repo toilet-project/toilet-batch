@@ -20,6 +20,30 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Set up Node for deployment preflight
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Validate and prepare paused account lifecycle configuration
+        id: lifecycle
+        env:
+          ACCOUNT_LIFECYCLE_DEPLOYMENT_APPROVED: ${{ vars.ACCOUNT_LIFECYCLE_DEPLOYMENT_APPROVED || 'false' }}
+          ACCOUNT_LIFECYCLE_MAINTENANCE: 'true'
+          ACCOUNT_RETENTION_ENABLED: 'false'
+          ACCOUNT_ERASURE_ENABLED: 'false'
+          ERASURE_LEDGER_ENABLED: 'false'
+          ERASURE_LEDGER_CATALOGUE_ENABLED: 'false'
+          ERASURE_LEDGER_ENDPOINT: ${{ vars.ERASURE_LEDGER_ENDPOINT }}
+          ERASURE_LEDGER_REALM: ${{ vars.ERASURE_LEDGER_REALM || 'production' }}
+          ERASURE_LEDGER_BUCKET: ${{ vars.ERASURE_LEDGER_BUCKET || 'geupddong-account-erasure-ledger' }}
+          ERASURE_LEDGER_ACTIVE_KEY_ID: ${{ vars.ERASURE_LEDGER_ACTIVE_KEY_ID || 'k1' }}
+          ERASURE_LEDGER_ACCESS_KEY_ID: ${{ secrets.ERASURE_LEDGER_ACCESS_KEY_ID }}
+          ERASURE_LEDGER_SECRET_ACCESS_KEY: ${{ secrets.ERASURE_LEDGER_SECRET_ACCESS_KEY }}
+          ERASURE_LEDGER_KEYS_JSON: ${{ secrets.ERASURE_LEDGER_KEYS_JSON }}
+          REDIS_PASSWORD: ${{ secrets.REDIS_PASSWORD }}
+        run: node scripts/prepare-account-lifecycle.mjs batch
+
       # 2. JDK 21 설정
       - name: Set up JDK 21
         uses: actions/setup-java@v4
@@ -74,13 +98,18 @@ jobs:
             ACCOUNT_ERASURE_ENABLED=false
             REDIS_HOST=redis
             REDIS_PORT=6379
-            REDIS_PASSWORD=${{ secrets.REDIS_PASSWORD }}
             BATCH_REGION_ENABLED=${{ vars.BATCH_REGION_ENABLED || 'false' }}
             REGION_JOURNAL_PATH=/var/lib/toilet-region/normalization.region.jsonl
             REGION_DAILY_CALL_BUDGET=${{ vars.REGION_DAILY_CALL_BUDGET || '1000' }}
             REGION_DELAY_MS=${{ vars.REGION_DELAY_MS || '1000' }}
             REGION_MAX_ITEMS=${{ vars.REGION_MAX_ITEMS || '100' }}
             EOF
+
+            # Only base64 crosses the shell boundary; JSON and dollar signs remain literal.
+            umask 077
+            printf '%s' '${{ steps.lifecycle.outputs.redisPayload }}' | base64 --decode >> .env
+            printf '%s' '${{ steps.lifecycle.outputs.payload }}' | base64 --decode > .account-lifecycle.env
+            chmod 600 .env .account-lifecycle.env
 
             cat <<EOF > docker-compose.yml
             services:
@@ -90,6 +119,7 @@ jobs:
                 restart: unless-stopped
                 env_file:
                   - .env
+                  - .account-lifecycle.env
                 volumes:
                   - ./region-results:/var/lib/toilet-region
                 networks:

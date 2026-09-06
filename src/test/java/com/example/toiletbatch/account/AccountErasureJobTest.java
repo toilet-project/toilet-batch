@@ -15,7 +15,8 @@ class AccountErasureJobTest {
     private final SimpleMeterRegistry metrics = new SimpleMeterRegistry();
 
     @Test void disabledDoesNotTouchDatabaseOrRedis() {
-        new AccountErasureJob(worker, notifier, metrics, false, 5000).runAfterSync();
+        new AccountErasureJob(worker, notifier, metrics, false, 5000, false).runAfterSync();
+        new AccountErasureJob(worker, notifier, metrics, true, 5000, true).runAfterSync();
         verifyNoInteractions(worker, notifier);
     }
 
@@ -25,7 +26,7 @@ class AccountErasureJobTest {
         when(worker.eraseIfDue(eq(1L), any())).thenThrow(new IllegalStateException("private data"));
         when(worker.eraseIfDue(eq(2L), any())).thenReturn(true);
         when(worker.countOverdue(any())).thenReturn(1L);
-        var job = new AccountErasureJob(worker, notifier, metrics, true, 5000);
+        var job = new AccountErasureJob(worker, notifier, metrics, true, 5000, false);
         job.runAfterSync();
         verify(worker).recordFailure(eq(1L), any(LocalDateTime.class));
         verify(worker).eraseIfDue(eq(2L), any());
@@ -40,7 +41,7 @@ class AccountErasureJobTest {
         when(worker.findDue(any(), eq(0L), eq(2))).thenReturn(List.of(1L, 2L));
         when(worker.eraseIfDue(anyLong(), any())).thenReturn(true);
         when(worker.countOverdue(any())).thenReturn(5L);
-        new AccountErasureJob(worker, notifier, metrics, true, 2).runAfterSync();
+        new AccountErasureJob(worker, notifier, metrics, true, 2, false).runAfterSync();
         verify(worker, times(1)).findDue(any(), anyLong(), anyInt());
         verify(notifier).notifyAccountErasureFailure(0, 5, false);
     }
@@ -48,7 +49,7 @@ class AccountErasureJobTest {
     @Test void infrastructureAndNotificationFailuresDoNotEscapeOrKeepJobLocked() {
         when(worker.findDue(any(), anyLong(), anyInt())).thenThrow(new IllegalStateException("secret"));
         doThrow(new IllegalStateException("webhook")).when(notifier).notifyAccountErasureFailure(anyInt(), anyLong(), anyBoolean());
-        var job = new AccountErasureJob(worker, notifier, metrics, true, 50);
+        var job = new AccountErasureJob(worker, notifier, metrics, true, 50, false);
         assertDoesNotThrow(job::runAfterSync);
         assertDoesNotThrow(job::runAfterSync);
         verify(notifier, times(2)).notifyAccountErasureFailure(0, 0, true);
@@ -59,14 +60,14 @@ class AccountErasureJobTest {
         when(worker.eraseIfDue(eq(1L), any())).thenThrow(new IllegalStateException());
         doThrow(new IllegalStateException()).when(worker).recordFailure(eq(1L), any());
         when(worker.eraseIfDue(eq(2L), any())).thenReturn(true);
-        assertDoesNotThrow(new AccountErasureJob(worker, notifier, metrics, true, 2)::runAfterSync);
+        assertDoesNotThrow(new AccountErasureJob(worker, notifier, metrics, true, 2, false)::runAfterSync);
         verify(worker).eraseIfDue(eq(2L), any());
     }
     @Test void globalLedgerFailureStopsFurtherExternalRequestsAndAlerts() {
         when(worker.findDue(any(), eq(0L), eq(2))).thenReturn(List.of(1L, 2L));
         when(worker.eraseIfDue(eq(1L), any())).thenThrow(new IllegalStateException("ERASURE_LEDGER_UNAVAILABLE"));
         when(worker.countOverdue(any())).thenReturn(2L);
-        new AccountErasureJob(worker, notifier, metrics, true, 2).runAfterSync();
+        new AccountErasureJob(worker, notifier, metrics, true, 2, false).runAfterSync();
         verify(worker, never()).eraseIfDue(eq(2L), any());
         verify(notifier).notifyAccountErasureFailure(1, 2, true);
     }

@@ -20,21 +20,24 @@ public class AccountErasureJob {
     private final BatchFailureNotifier notifier;
     private final MeterRegistry metrics;
     private final boolean enabled;
+    private final boolean maintenance;
     private final int maxPerRun;
     private final AtomicBoolean running = new AtomicBoolean();
     private final AtomicLong overdue = new AtomicLong();
 
     public AccountErasureJob(AccountErasureWorker worker, BatchFailureNotifier notifier, MeterRegistry metrics,
             @Value("${batch.account-erasure.enabled:false}") boolean enabled,
-            @Value("${batch.account-erasure.max-per-run:5000}") int maxPerRun) {
+            @Value("${batch.account-erasure.max-per-run:5000}") int maxPerRun,
+            @Value("${account.lifecycle.maintenance:true}") boolean maintenance) {
         if (maxPerRun < 1 || maxPerRun > 100000) throw new IllegalArgumentException("Invalid erasure run limit");
         this.worker = worker; this.notifier = notifier; this.metrics = metrics;
         this.enabled = enabled; this.maxPerRun = maxPerRun;
+        this.maintenance = maintenance;
         metrics.gauge("account.erasure.overdue", overdue);
     }
 
     public void runAfterSync() {
-        if (!enabled || !running.compareAndSet(false, true)) return;
+        if (!enabled || maintenance || !running.compareAndSet(false, true)) return;
         var cutoff = LocalDateTime.now(KST);
         int attempted = 0, completed = 0, failed = 0;
         long afterId = 0;

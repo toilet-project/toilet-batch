@@ -53,6 +53,10 @@ kakao:
     base-url: https://dapi.kakao.com
     rest-api-key: ${KAKAO_REST_API_KEY:}
 
+account:
+  lifecycle:
+    maintenance: ${ACCOUNT_LIFECYCLE_MAINTENANCE:true}
+
 batch:
   account-erasure:
     enabled: ${ACCOUNT_ERASURE_ENABLED:false}

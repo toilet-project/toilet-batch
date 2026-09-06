@@ -27,7 +27,7 @@ class AccountErasureWorkerTest {
         ledger = mock(com.geupddong.account.ErasureLedger.class);
         var transactions = new DataSourceTransactionManager(ds);
         transaction = new org.springframework.transaction.support.TransactionTemplate(transactions);
-        worker = new AccountErasureWorker(jdbc, sessions, transactions, ledger, "production");
+        worker = new AccountErasureWorker(jdbc, sessions, transactions, ledger, "production", true, false);
         jdbc.execute("CREATE TABLE app_user(user_id BIGINT PRIMARY KEY, status VARCHAR(30), created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)");
         jdbc.execute("CREATE TABLE account_withdrawal(user_id BIGINT PRIMARY KEY, "
                 + "purge_after TIMESTAMP, next_attempt_at TIMESTAMP, attempts INT DEFAULT 0, last_failure_code VARCHAR(50), withdrawal_key CHAR(36), "
@@ -71,6 +71,16 @@ class AccountErasureWorkerTest {
         order.verify(ledger).ensureRecorded(any());
         order.verify(sessions).clear(1);
         assertFalse(worker.eraseIfDue(1, now));
+    }
+
+    @Test void pausedDirectWorkerNeverTouchesDatabaseRedisOrLedger() {
+        for (boolean maintenance : new boolean[]{false, true}) {
+            var db = mock(JdbcTemplate.class);
+            var manager = mock(org.springframework.transaction.PlatformTransactionManager.class);
+            var stopped = new AccountErasureWorker(db, sessions, manager, ledger, "production", maintenance, maintenance);
+            assertThrows(IllegalStateException.class, () -> stopped.eraseIfDue(1, now));
+            verifyNoInteractions(db, manager, sessions, ledger);
+        }
     }
 
     @Test void futureDeadlineRestoredAndLegacyAccountsAreNotErased() {
