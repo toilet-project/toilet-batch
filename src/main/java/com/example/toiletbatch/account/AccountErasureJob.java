@@ -40,7 +40,7 @@ public class AccountErasureJob {
         long afterId = 0;
         boolean infrastructureFailure = false;
         try {
-            while (attempted < maxPerRun) {
+            scan: while (attempted < maxPerRun) {
                 var ids = worker.findDue(cutoff, afterId, Math.min(50, maxPerRun - attempted));
                 if (ids.isEmpty()) break;
                 for (long id : ids) {
@@ -58,6 +58,12 @@ public class AccountErasureJob {
                         try { worker.recordFailure(id, LocalDateTime.now(KST)); }
                         catch (RuntimeException unavailable) {
                             log.error("Account erasure checkpoint unavailable");
+                        }
+                        // Stop a systemic R2 outage/configuration error from holding the daily chain for hours.
+                        if ("ERASURE_LEDGER_UNAVAILABLE".equals(failure.getMessage())
+                                || "ERASURE_LEDGER_NOT_CONFIGURED".equals(failure.getMessage())) {
+                            infrastructureFailure = true;
+                            break scan;
                         }
                     }
                 }

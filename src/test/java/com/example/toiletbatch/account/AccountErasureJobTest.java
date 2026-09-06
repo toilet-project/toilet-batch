@@ -62,4 +62,12 @@ class AccountErasureJobTest {
         assertDoesNotThrow(new AccountErasureJob(worker, notifier, metrics, true, 2)::runAfterSync);
         verify(worker).eraseIfDue(eq(2L), any());
     }
+    @Test void globalLedgerFailureStopsFurtherExternalRequestsAndAlerts() {
+        when(worker.findDue(any(), eq(0L), eq(2))).thenReturn(List.of(1L, 2L));
+        when(worker.eraseIfDue(eq(1L), any())).thenThrow(new IllegalStateException("ERASURE_LEDGER_UNAVAILABLE"));
+        when(worker.countOverdue(any())).thenReturn(2L);
+        new AccountErasureJob(worker, notifier, metrics, true, 2).runAfterSync();
+        verify(worker, never()).eraseIfDue(eq(2L), any());
+        verify(notifier).notifyAccountErasureFailure(1, 2, true);
+    }
 }

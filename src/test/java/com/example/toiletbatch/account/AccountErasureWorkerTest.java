@@ -15,6 +15,7 @@ class AccountErasureWorkerTest {
     private JdbcTemplate jdbc;
     private AccountErasureWorker worker;
     private AccountSessionCleaner sessions;
+    private com.geupddong.account.ErasureLedger ledger;
     private org.springframework.transaction.support.TransactionTemplate transaction;
     private final LocalDateTime now = LocalDateTime.of(2026, 9, 6, 2, 30);
 
@@ -23,12 +24,13 @@ class AccountErasureWorkerTest {
                 : new DriverManagerDataSource("jdbc:h2:mem:" + UUID.randomUUID() + ";MODE=MySQL;DB_CLOSE_DELAY=-1", "sa", "");
         jdbc = new JdbcTemplate(ds);
         sessions = mock(AccountSessionCleaner.class);
+        ledger = mock(com.geupddong.account.ErasureLedger.class);
         var transactions = new DataSourceTransactionManager(ds);
         transaction = new org.springframework.transaction.support.TransactionTemplate(transactions);
-        worker = new AccountErasureWorker(jdbc, sessions, transactions);
-        jdbc.execute("CREATE TABLE app_user(user_id BIGINT PRIMARY KEY, status VARCHAR(30))");
+        worker = new AccountErasureWorker(jdbc, sessions, transactions, ledger, "production");
+        jdbc.execute("CREATE TABLE app_user(user_id BIGINT PRIMARY KEY, status VARCHAR(30), created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)");
         jdbc.execute("CREATE TABLE account_withdrawal(user_id BIGINT PRIMARY KEY, "
-                + "purge_after TIMESTAMP, next_attempt_at TIMESTAMP, attempts INT DEFAULT 0, last_failure_code VARCHAR(50), "
+                + "purge_after TIMESTAMP, next_attempt_at TIMESTAMP, attempts INT DEFAULT 0, last_failure_code VARCHAR(50), withdrawal_key CHAR(36), "
                 + "FOREIGN KEY(user_id) REFERENCES app_user(user_id))");
         jdbc.execute("CREATE TABLE toilet_report(report_id BIGINT PRIMARY KEY, reporter_user_id BIGINT, "
                 + "reviewed_by_user_id BIGINT, reason VARCHAR(100), review_note VARCHAR(100), "
@@ -54,8 +56,8 @@ class AccountErasureWorkerTest {
     }
 
     private void member(long id, String status, LocalDateTime due) {
-        jdbc.update("INSERT INTO app_user VALUES(?,?)", id, status);
-        jdbc.update("INSERT INTO account_withdrawal(user_id,purge_after,next_attempt_at) VALUES(?,?,?)", id, due, due);
+        jdbc.update("INSERT INTO app_user(user_id,status) VALUES(?,?)", id, status);
+        jdbc.update("INSERT INTO account_withdrawal(user_id,purge_after,next_attempt_at,withdrawal_key) VALUES(?,?,?,?)", id, due, due, UUID.randomUUID().toString());
     }
 
     @Test void erasesOnlyIdentityAndPreservesStructuredReport() {
@@ -65,13 +67,16 @@ class AccountErasureWorkerTest {
                 + "AND reviewed_by_user_id IS NULL AND proposed_latitude=37.5", Integer.class));
         assertEquals(0, jdbc.queryForObject("SELECT COUNT(*) FROM audit_log WHERE detail_json IS NOT NULL", Integer.class));
         verify(sessions).clear(1);
+        var order = inOrder(ledger, sessions);
+        order.verify(ledger).ensureRecorded(any());
+        order.verify(sessions).clear(1);
         assertFalse(worker.eraseIfDue(1, now));
     }
 
     @Test void futureDeadlineRestoredAndLegacyAccountsAreNotErased() {
         member(2, "WITHDRAWN", now.plusSeconds(1));
         member(3, "ACTIVE", now.minusDays(1));
-        jdbc.update("INSERT INTO app_user VALUES(4,'WITHDRAWN')");
+        jdbc.update("INSERT INTO app_user(user_id,status) VALUES(4,'WITHDRAWN')");
         assertFalse(worker.eraseIfDue(2, now));
         assertFalse(worker.eraseIfDue(3, now));
         assertFalse(worker.eraseIfDue(4, now));
@@ -95,6 +100,12 @@ class AccountErasureWorkerTest {
         assertThrows(IllegalStateException.class, () -> worker.eraseIfDue(1, now));
         assertEquals(1L, jdbc.queryForObject("SELECT reporter_user_id FROM toilet_report", Long.class));
         assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM account_withdrawal", Integer.class));
+    }
+    @Test void r2FailureDoesNotRemoveSessionsOrDatabaseRows() {
+        doThrow(new IllegalStateException("ERASURE_LEDGER_UNAVAILABLE")).when(ledger).ensureRecorded(any());
+        assertThrows(IllegalStateException.class, () -> worker.eraseIfDue(1, now));
+        verifyNoInteractions(sessions);
+        assertEquals(1L, jdbc.queryForObject("SELECT reporter_user_id FROM toilet_report", Long.class));
     }
 
     @Test void keysetResumesWithoutSkippingRowsAfterDeletion() {

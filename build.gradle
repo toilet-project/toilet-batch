@@ -19,6 +19,8 @@ repositories {
 }
 
 dependencies {
+    implementation 'software.amazon.awssdk:s3:2.54.13'
+    implementation 'software.amazon.awssdk:url-connection-client:2.54.13'
     // 1. Web & JPA (필수)
     implementation 'org.springframework.boot:spring-boot-starter-web'
     implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
@@ -55,4 +57,9 @@ tasks.named('test') {
 tasks.register('regionNormalize', JavaExec) {
     classpath = sourceSets.main.runtimeClasspath
     mainClass = 'com.example.toiletbatch.region.RegionNormalizationCli'
+}
+
+tasks.register('accountErasureRestore', JavaExec) {
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'com.example.toiletbatch.account.AccountErasureRestoreCli'
 }

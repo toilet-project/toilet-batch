@@ -14,12 +14,16 @@ public class AccountErasureWorker {
     private final JdbcTemplate jdbc;
     private final AccountSessionCleaner sessions;
     private final TransactionTemplate transaction;
+    private final com.geupddong.account.ErasureLedger ledger;
+    private final String realm;
 
     public AccountErasureWorker(JdbcTemplate jdbc, AccountSessionCleaner sessions,
-            PlatformTransactionManager transactions) {
+            PlatformTransactionManager transactions, com.geupddong.account.ErasureLedger ledger,
+            @org.springframework.beans.factory.annotation.Value("${erasure.ledger.realm:production}") String realm) {
         this.jdbc = jdbc;
         this.sessions = sessions;
         this.transaction = new TransactionTemplate(transactions);
+        this.ledger = ledger; this.realm = realm;
     }
 
     public List<Long> findDue(LocalDateTime cutoff, long afterId, int limit) {
@@ -38,6 +42,12 @@ public class AccountErasureWorker {
                             rs.getTimestamp(1).toLocalDateTime(), rs.getTimestamp(2).toLocalDateTime() }, id);
             if (deadlines.isEmpty() || deadlines.getFirst()[0].isAfter(cutoff)
                     || deadlines.getFirst()[1].isAfter(cutoff)) return false;
+            var createdAt = jdbc.queryForObject("SELECT created_at FROM app_user WHERE user_id=?",
+                    java.sql.Timestamp.class, id).toLocalDateTime();
+            var withdrawalKey = jdbc.queryForObject("SELECT withdrawal_key FROM account_withdrawal WHERE user_id=?",
+                    String.class, id);
+            ledger.ensureRecorded(new com.geupddong.account.ErasureRecord(1, realm, id,
+                    createdAt.toString(), withdrawalKey, deadlines.getFirst()[0].toString()));
             // Redis is not in the SQL transaction. On failure keep DB data for a safe retry.
             sessions.clear(id);
             AccountErasureSql.erase(jdbc, id);
