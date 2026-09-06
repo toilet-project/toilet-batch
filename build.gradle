@@ -46,6 +46,8 @@ dependencies {
 }
 
 tasks.named('test') {
+    inputs.property('accountRetentionMySqlMarker', System.getenv('ACCOUNT_RETENTION_MYSQL_MARKER') ?: '')
+    inputs.property('accountRetentionMySqlPort', System.getenv('ACCOUNT_RETENTION_MYSQL_PORT') ?: '')
     useJUnitPlatform()
 }
 

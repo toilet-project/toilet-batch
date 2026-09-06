@@ -10,7 +10,7 @@ import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
-/** Synthetic FK fixture verifies transactions; it is NOT a substitute for production MySQL V11 validation. */
+/** Synthetic FK fixture on H2 or opt-in guarded native MySQL; separate from full-schema V11 validation. */
 class AccountErasureWorkerTest {
     private JdbcTemplate jdbc;
     private AccountErasureWorker worker;
@@ -19,25 +19,29 @@ class AccountErasureWorkerTest {
     private final LocalDateTime now = LocalDateTime.of(2026, 9, 6, 2, 30);
 
     @BeforeEach void prepare() {
-        var ds = new DriverManagerDataSource("jdbc:h2:mem:" + UUID.randomUUID() + ";MODE=MySQL;DB_CLOSE_DELAY=-1", "sa", "");
+        var ds = NativeMySqlFixture.enabled() ? NativeMySqlFixture.create()
+                : new DriverManagerDataSource("jdbc:h2:mem:" + UUID.randomUUID() + ";MODE=MySQL;DB_CLOSE_DELAY=-1", "sa", "");
         jdbc = new JdbcTemplate(ds);
         sessions = mock(AccountSessionCleaner.class);
         var transactions = new DataSourceTransactionManager(ds);
         transaction = new org.springframework.transaction.support.TransactionTemplate(transactions);
         worker = new AccountErasureWorker(jdbc, sessions, transactions);
         jdbc.execute("CREATE TABLE app_user(user_id BIGINT PRIMARY KEY, status VARCHAR(30))");
-        jdbc.execute("CREATE TABLE account_withdrawal(user_id BIGINT PRIMARY KEY REFERENCES app_user(user_id), "
-                + "purge_after TIMESTAMP, next_attempt_at TIMESTAMP, attempts INT DEFAULT 0, last_failure_code VARCHAR(50))");
-        jdbc.execute("CREATE TABLE toilet_report(report_id BIGINT PRIMARY KEY, reporter_user_id BIGINT REFERENCES app_user(user_id), "
-                + "reviewed_by_user_id BIGINT REFERENCES app_user(user_id), reason VARCHAR(100), review_note VARCHAR(100), "
-                + "active_request_key VARCHAR(100), proposed_latitude DECIMAL(10,7))");
-        jdbc.execute("CREATE TABLE audit_log(actor_user_id BIGINT REFERENCES app_user(user_id), actor_erased BOOLEAN DEFAULT FALSE, "
-                + "target_type VARCHAR(50), target_id BIGINT, detail_json VARCHAR(100))");
-        jdbc.execute("CREATE TABLE coordinate_revision(applied_by_user_id BIGINT REFERENCES app_user(user_id))");
-        jdbc.execute("CREATE TABLE coordinate_quality_review(reviewed_by_user_id BIGINT REFERENCES app_user(user_id), review_note VARCHAR(100))");
-        jdbc.execute("CREATE TABLE user_role(user_id BIGINT REFERENCES app_user(user_id), granted_by_user_id BIGINT REFERENCES app_user(user_id))");
+        jdbc.execute("CREATE TABLE account_withdrawal(user_id BIGINT PRIMARY KEY, "
+                + "purge_after TIMESTAMP, next_attempt_at TIMESTAMP, attempts INT DEFAULT 0, last_failure_code VARCHAR(50), "
+                + "FOREIGN KEY(user_id) REFERENCES app_user(user_id))");
+        jdbc.execute("CREATE TABLE toilet_report(report_id BIGINT PRIMARY KEY, reporter_user_id BIGINT, "
+                + "reviewed_by_user_id BIGINT, reason VARCHAR(100), review_note VARCHAR(100), "
+                + "active_request_key VARCHAR(100), proposed_latitude DECIMAL(10,7), "
+                + "FOREIGN KEY(reporter_user_id) REFERENCES app_user(user_id), FOREIGN KEY(reviewed_by_user_id) REFERENCES app_user(user_id))");
+        jdbc.execute("CREATE TABLE audit_log(actor_user_id BIGINT, actor_erased BOOLEAN DEFAULT FALSE, "
+                + "target_type VARCHAR(50), target_id BIGINT, detail_json VARCHAR(100), FOREIGN KEY(actor_user_id) REFERENCES app_user(user_id))");
+        jdbc.execute("CREATE TABLE coordinate_revision(applied_by_user_id BIGINT, FOREIGN KEY(applied_by_user_id) REFERENCES app_user(user_id))");
+        jdbc.execute("CREATE TABLE coordinate_quality_review(reviewed_by_user_id BIGINT, review_note VARCHAR(100), FOREIGN KEY(reviewed_by_user_id) REFERENCES app_user(user_id))");
+        jdbc.execute("CREATE TABLE user_role(user_id BIGINT, granted_by_user_id BIGINT, "
+                + "FOREIGN KEY(user_id) REFERENCES app_user(user_id), FOREIGN KEY(granted_by_user_id) REFERENCES app_user(user_id))");
         for (String table : new String[]{"user_notification", "user_policy_consent", "user_social_account"})
-            jdbc.execute("CREATE TABLE " + table + "(user_id BIGINT REFERENCES app_user(user_id))");
+            jdbc.execute("CREATE TABLE " + table + "(user_id BIGINT, FOREIGN KEY(user_id) REFERENCES app_user(user_id))");
         member(1, "WITHDRAWN", now);
         jdbc.update("INSERT INTO toilet_report VALUES(11,1,1,'contact','review','key',37.5)");
         jdbc.update("INSERT INTO audit_log VALUES(1,FALSE,'USER',1,'personal')");
@@ -75,7 +79,7 @@ class AccountErasureWorkerTest {
     }
 
     @Test void sqlFailureRollsBackAllUnlinkingAndRecordsRetry() {
-        jdbc.execute("CREATE TABLE unknown_reference(user_id BIGINT REFERENCES app_user(user_id))");
+        jdbc.execute("CREATE TABLE unknown_reference(user_id BIGINT, FOREIGN KEY(user_id) REFERENCES app_user(user_id))");
         jdbc.update("INSERT INTO unknown_reference VALUES(1)");
         assertThrows(RuntimeException.class, () -> worker.eraseIfDue(1, now));
         assertEquals(1L, jdbc.queryForObject("SELECT reporter_user_id FROM toilet_report", Long.class));
