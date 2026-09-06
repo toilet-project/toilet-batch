@@ -2,6 +2,14 @@ server:
   port: ${BATCH_PORT}
 
 spring:
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      database: ${REDIS_DATABASE:0}
+      connect-timeout: 2s
+      timeout: 2s
   jackson:
     time-zone: Asia/Seoul
   datasource:
@@ -46,6 +54,9 @@ kakao:
     rest-api-key: ${KAKAO_REST_API_KEY:}
 
 batch:
+  account-erasure:
+    enabled: ${ACCOUNT_ERASURE_ENABLED:false}
+    max-per-run: ${ACCOUNT_ERASURE_MAX_PER_RUN:5000}
   restroom-sync:
     cron: "0 0 2 * * *"
     zone: Asia/Seoul
@@ -55,6 +66,9 @@ batch:
     webhook-url: ${BATCH_FAILURE_WEBHOOK_URL:}
 
 management:
+  health:
+    redis:
+      enabled: ${ACCOUNT_ERASURE_ENABLED:false}
   endpoints:
     web:
       exposure:
