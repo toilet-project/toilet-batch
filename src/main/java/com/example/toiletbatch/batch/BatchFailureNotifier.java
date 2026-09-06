@@ -26,6 +26,14 @@ public class BatchFailureNotifier {
         this.syncProperties = syncProperties;
     }
 
+    public void notifyAccountErasureFailure(int failed, long overdue, boolean infrastructureFailure) {
+        send("[급똥] 회원정보 파기 확인 필요\n"
+                + "- 시각: " + ZonedDateTime.now(syncProperties.zoneId()) + "\n"
+                + "- 계정 처리 실패: " + failed + ", 기한 경과 미완료: " + overdue + "\n"
+                + "- 기반 시스템 오류: " + infrastructureFailure + "\n"
+                + "- 조치: account_withdrawal 체크포인트와 배치 로그를 확인하세요. 다음 일일 후속 작업에서 재시도합니다.");
+    }
+
     public void notifyFailure(RuntimeException exception) {
         if (!notificationProperties.enabled()) {
             log.warn("배치 실패 Webhook이 설정되지 않아 알림 전송을 건너뜁니다.");
@@ -39,6 +47,14 @@ public class BatchFailureNotifier {
                 + "- 오류 유형: " + errorType + "\n"
                 + "- 조치: 관리자 배치 실행 이력에서 실패 사유를 확인해 주세요.";
 
+        send(content);
+    }
+
+    private void send(String content) {
+        if (!notificationProperties.enabled()) {
+            log.warn("Batch notification webhook is not configured");
+            return;
+        }
         try {
             restClient.post()
                     .uri(notificationProperties.webhookUrl())

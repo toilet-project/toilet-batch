@@ -12,13 +12,16 @@ public class RestroomSyncScheduler {
 
     private final RestroomSyncExecutionService restroomSyncExecutionService;
     private final BatchFailureNotifier batchFailureNotifier;
+    private final com.example.toiletbatch.account.AccountErasureJob accountErasureJob;
 
     public RestroomSyncScheduler(
             RestroomSyncExecutionService restroomSyncExecutionService,
-            BatchFailureNotifier batchFailureNotifier
+            BatchFailureNotifier batchFailureNotifier,
+            com.example.toiletbatch.account.AccountErasureJob accountErasureJob
     ) {
         this.restroomSyncExecutionService = restroomSyncExecutionService;
         this.batchFailureNotifier = batchFailureNotifier;
+        this.accountErasureJob = accountErasureJob;
     }
 
     @Scheduled(cron = "${batch.restroom-sync.cron}", zone = "${batch.restroom-sync.zone}")
@@ -33,6 +36,10 @@ public class RestroomSyncScheduler {
         } catch (RuntimeException exception) {
             log.error("공중화장실 일일 동기화에 실패했습니다.", exception);
             batchFailureNotifier.notifyFailure(exception);
+        } finally {
+            // Only the scheduled daily chain invokes erasure; manual sync/analysis never does.
+            // The job records its own failures and does not alter public-data sync history.
+            accountErasureJob.runAfterSync();
         }
     }
 }

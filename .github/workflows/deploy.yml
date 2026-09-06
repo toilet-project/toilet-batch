@@ -20,6 +20,33 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Set up Node for deployment preflight
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Validate and prepare paused account lifecycle configuration
+        id: lifecycle
+        env:
+          ACCOUNT_LIFECYCLE_DEPLOYMENT_APPROVED: ${{ vars.ACCOUNT_LIFECYCLE_DEPLOYMENT_APPROVED || 'false' }}
+          ACCOUNT_LIFECYCLE_MAINTENANCE: 'true'
+          ACCOUNT_RETENTION_ENABLED: 'false'
+          ACCOUNT_ERASURE_ENABLED: 'false'
+          ERASURE_LEDGER_ENABLED: 'false'
+          ERASURE_LEDGER_CATALOGUE_ENABLED: 'false'
+          ERASURE_LEDGER_ENDPOINT: ${{ vars.ERASURE_LEDGER_ENDPOINT }}
+          ERASURE_LEDGER_REALM: ${{ vars.ERASURE_LEDGER_REALM || 'production' }}
+          ERASURE_LEDGER_BUCKET: ${{ vars.ERASURE_LEDGER_BUCKET || 'geupddong-account-erasure-ledger' }}
+          ERASURE_LEDGER_ACTIVE_KEY_ID: ${{ vars.ERASURE_LEDGER_ACTIVE_KEY_ID || 'k1' }}
+          ERASURE_LEDGER_ACCESS_KEY_ID: ${{ secrets.ERASURE_LEDGER_ACCESS_KEY_ID }}
+          ERASURE_LEDGER_SECRET_ACCESS_KEY: ${{ secrets.ERASURE_LEDGER_SECRET_ACCESS_KEY }}
+          ERASURE_LEDGER_KEYS_JSON: ${{ secrets.ERASURE_LEDGER_KEYS_JSON }}
+          ERASURE_CHECKPOINT_ENABLED: 'false'
+          ERASURE_CHECKPOINT_GITHUB_TOKEN: ${{ secrets.ERASURE_CHECKPOINT_GITHUB_TOKEN }}
+          ERASURE_CHECKPOINT_DATABASE_EPOCH: ${{ vars.ERASURE_CHECKPOINT_DATABASE_EPOCH }}
+          REDIS_PASSWORD: ${{ secrets.REDIS_PASSWORD }}
+        run: node scripts/prepare-account-lifecycle.mjs batch
+
       # 2. JDK 21 설정
       - name: Set up JDK 21
         uses: actions/setup-java@v4
@@ -46,7 +73,9 @@ jobs:
         with:
           context: .
           push: true
-          tags: ${{ secrets.DOCKERHUB_USERNAME }}/toilet-batch:latest
+          tags: |
+            ${{ secrets.DOCKERHUB_USERNAME }}/toilet-batch:latest
+            ${{ secrets.DOCKERHUB_USERNAME }}/toilet-batch:${{ github.sha }}
 
       # 6. 미니 PC에 SSH 접속하여 배포 실행 (.env 자동 생성)
       - name: Deploy to Mini PC via SSH
@@ -57,9 +86,19 @@ jobs:
           username: ${{ secrets.MINI_PC_USERNAME }}
           key: ${{ secrets.MINI_PC_KEY }}
           script: |
+            set -eu
+            umask 077
             mkdir -p ~/toilet-batch
             cd ~/toilet-batch
             mkdir -p region-results
+
+            rollback_dir=$(mktemp -d "$PWD/rollback-preparation.XXXXXXXX")
+            for file in .env .account-lifecycle.env docker-compose.yml; do
+              if [ -f "$file" ]; then cp -p -- "$file" "$rollback_dir/"; fi
+            done
+            if docker container inspect toilet-batch >/dev/null 2>&1; then
+              docker container inspect --format '{{.Image}}' toilet-batch > "$rollback_dir/batch-image-id"
+            fi
 
             # GitHub Secrets 내용으로 .env 파일 생성
             cat <<EOF > .env
@@ -70,6 +109,10 @@ jobs:
             PUBLIC_DATA_API_KEY=${{ secrets.PUBLIC_DATA_API_KEY }}
             KAKAO_REST_API_KEY=${{ secrets.KAKAO_REST_API_KEY }}
             BATCH_FAILURE_WEBHOOK_URL=${{ secrets.BATCH_FAILURE_WEBHOOK_URL }}
+            # Keep disabled until MySQL, Redis grants and backup erasure gates are verified.
+            ACCOUNT_ERASURE_ENABLED=false
+            REDIS_HOST=redis
+            REDIS_PORT=6379
             BATCH_REGION_ENABLED=${{ vars.BATCH_REGION_ENABLED || 'false' }}
             REGION_JOURNAL_PATH=/var/lib/toilet-region/normalization.region.jsonl
             REGION_DAILY_CALL_BUDGET=${{ vars.REGION_DAILY_CALL_BUDGET || '1000' }}
@@ -77,14 +120,21 @@ jobs:
             REGION_MAX_ITEMS=${{ vars.REGION_MAX_ITEMS || '100' }}
             EOF
 
-            cat <<EOF > docker-compose.yml
+            # Only base64 crosses the shell boundary; JSON and dollar signs remain literal.
+            umask 077
+            printf '%s' '${{ steps.lifecycle.outputs.redisPayload }}' | base64 --decode >> .env
+            printf '%s' '${{ steps.lifecycle.outputs.payload }}' | base64 --decode > .account-lifecycle.env
+            chmod 600 .env .account-lifecycle.env
+
+            cat <<'EOF' > docker-compose.yml
             services:
               toilet-batch:
-                image: ${{ secrets.DOCKERHUB_USERNAME }}/toilet-batch:latest
+                image: ${{ secrets.DOCKERHUB_USERNAME }}/toilet-batch:${{ github.sha }}
                 container_name: toilet-batch
                 restart: unless-stopped
                 env_file:
                   - .env
+                  - .account-lifecycle.env
                 volumes:
                   - ./region-results:/var/lib/toilet-region
                 networks:
@@ -100,6 +150,6 @@ jobs:
                 external: true
             EOF
 
+            docker compose -f docker-compose.yml config --quiet
             docker compose -f docker-compose.yml pull
-            docker compose -f docker-compose.yml up -d
-            docker image prune -f --filter "until=24h"
+            docker compose -f docker-compose.yml up -d --wait --wait-timeout 120 toilet-batch

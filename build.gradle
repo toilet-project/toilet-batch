@@ -19,9 +19,12 @@ repositories {
 }
 
 dependencies {
+    implementation 'software.amazon.awssdk:s3:2.54.13'
+    implementation 'software.amazon.awssdk:url-connection-client:2.54.13'
     // 1. Web & JPA (필수)
     implementation 'org.springframework.boot:spring-boot-starter-web'
     implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
+    implementation 'org.springframework.boot:spring-boot-starter-data-redis'
     implementation 'org.springframework.boot:spring-boot-starter-actuator'
     implementation 'com.fasterxml.jackson.core:jackson-databind'
 
@@ -45,6 +48,13 @@ dependencies {
 }
 
 tasks.named('test') {
+    inputs.property('erasureBackupBash', System.getenv('ERASURE_BACKUP_BASH') ?: '')
+    inputs.property('erasureBackupScriptPath', System.getenv('ERASURE_BACKUP_SCRIPT') ?: '')
+    if (System.getenv('ERASURE_BACKUP_SCRIPT')) {
+        inputs.file(System.getenv('ERASURE_BACKUP_SCRIPT')).withPropertyName('erasureBackupScript')
+    }
+    inputs.property('accountRetentionMySqlMarker', System.getenv('ACCOUNT_RETENTION_MYSQL_MARKER') ?: '')
+    inputs.property('accountRetentionMySqlPort', System.getenv('ACCOUNT_RETENTION_MYSQL_PORT') ?: '')
     useJUnitPlatform()
 }
 
@@ -52,4 +62,17 @@ tasks.named('test') {
 tasks.register('regionNormalize', JavaExec) {
     classpath = sourceSets.main.runtimeClasspath
     mainClass = 'com.example.toiletbatch.region.RegionNormalizationCli'
+}
+
+tasks.register('accountErasureRestore', JavaExec) {
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'com.example.toiletbatch.account.AccountErasureRestoreCli'
+}
+
+// Standalone CLI classpath; no application server, scheduler, DB or Redis auto-configuration.
+tasks.register('installErasureTools', Sync) {
+    dependsOn tasks.named('jar')
+    from(tasks.named('jar'))
+    from(configurations.runtimeClasspath.filter { !it.name.startsWith('spring-boot-devtools-') })
+    into(layout.buildDirectory.dir('erasure-tools/lib'))
 }

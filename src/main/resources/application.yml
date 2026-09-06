@@ -2,6 +2,14 @@ server:
   port: ${BATCH_PORT}
 
 spring:
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      database: ${REDIS_DATABASE:0}
+      connect-timeout: 2s
+      timeout: 2s
   jackson:
     time-zone: Asia/Seoul
   datasource:
@@ -45,7 +53,14 @@ kakao:
     base-url: https://dapi.kakao.com
     rest-api-key: ${KAKAO_REST_API_KEY:}
 
+account:
+  lifecycle:
+    maintenance: ${ACCOUNT_LIFECYCLE_MAINTENANCE:true}
+
 batch:
+  account-erasure:
+    enabled: ${ACCOUNT_ERASURE_ENABLED:false}
+    max-per-run: ${ACCOUNT_ERASURE_MAX_PER_RUN:5000}
   restroom-sync:
     cron: "0 0 2 * * *"
     zone: Asia/Seoul
@@ -55,6 +70,9 @@ batch:
     webhook-url: ${BATCH_FAILURE_WEBHOOK_URL:}
 
 management:
+  health:
+    redis:
+      enabled: ${ACCOUNT_ERASURE_ENABLED:false}
   endpoints:
     web:
       exposure:
@@ -65,3 +83,14 @@ management:
   metrics:
     tags:
       application: toilet-batch
+erasure:
+  ledger:
+    enabled: ${ERASURE_LEDGER_ENABLED:false}
+    catalogue-enabled: ${ERASURE_LEDGER_CATALOGUE_ENABLED:false}
+    realm: ${ERASURE_LEDGER_REALM:production}
+    bucket: ${ERASURE_LEDGER_BUCKET:geupddong-account-erasure-ledger}
+    endpoint: ${ERASURE_LEDGER_ENDPOINT:}
+    access-key-id: ${ERASURE_LEDGER_ACCESS_KEY_ID:}
+    secret-access-key: ${ERASURE_LEDGER_SECRET_ACCESS_KEY:}
+    active-key-id: ${ERASURE_LEDGER_ACTIVE_KEY_ID:k1}
+    keys-json: ${ERASURE_LEDGER_KEYS_JSON:}
