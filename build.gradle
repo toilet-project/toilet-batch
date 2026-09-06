@@ -63,3 +63,11 @@ tasks.register('accountErasureRestore', JavaExec) {
     classpath = sourceSets.main.runtimeClasspath
     mainClass = 'com.example.toiletbatch.account.AccountErasureRestoreCli'
 }
+
+// Standalone CLI classpath; no application server, scheduler, DB or Redis auto-configuration.
+tasks.register('installErasureTools', Sync) {
+    dependsOn tasks.named('jar')
+    from(tasks.named('jar'))
+    from(configurations.runtimeClasspath.filter { !it.name.startsWith('spring-boot-devtools-') })
+    into(layout.buildDirectory.dir('erasure-tools/lib'))
+}
