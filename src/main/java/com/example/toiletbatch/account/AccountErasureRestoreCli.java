@@ -13,6 +13,7 @@ import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 public final class AccountErasureRestoreCli {
     private AccountErasureRestoreCli() { }
     public static void main(String[] args) {
+        String stage = "arguments";
         try {
             boolean apply = args.length == 1 && "--apply".equals(args[0]);
             if (args.length > 1 || (args.length == 1 && !apply && !"--dry-run".equals(args[0])))
@@ -34,6 +35,7 @@ public final class AccountErasureRestoreCli {
             var ds = new DriverManagerDataSource(url + "?connectionTimeZone=%2B09:00&forceConnectionTimeZoneToSession=true",
                     env.getRequiredProperty("ERASURE_RESTORE_DB_USER"), env.getRequiredProperty("ERASURE_RESTORE_DB_PASSWORD"));
             var jdbc = new JdbcTemplate(ds);
+            stage = "database-guard";
             if (containerIsolated) {
                 String serverUuid = env.getRequiredProperty("ERASURE_RESTORE_SERVER_UUID");
                 if (!serverUuid.matches("[a-f0-9-]{36}")
@@ -44,16 +46,19 @@ public final class AccountErasureRestoreCli {
             }
             if (!marker.equals(jdbc.queryForObject("SELECT marker FROM erasure_restore_guard", String.class)))
                 throw new IllegalStateException();
+            stage = "ledger-configuration";
             try (var ledger = ErasureLedgerFactory.configured(env)) {
                 int expected = Integer.parseInt(env.getRequiredProperty("ERASURE_RESTORE_EXPECTED_OBJECTS"));
+                stage = "ledger-snapshot";
                 var records = ledger.readAll(expected);
+                stage = "database-replay";
                 var result = new AccountErasureRestore(jdbc, new DataSourceTransactionManager(ds)).replay(
                         records, env.getRequiredProperty("erasure.ledger.realm"), LocalDateTime.now(ZoneId.of("Asia/Seoul")), apply);
                 System.out.printf("dryRun=%s records=%d matched=%d absent=%d erased=%d%n",
                         !apply, result.records(), result.matched(), result.absent(), result.erased());
             }
         } catch (Exception ignored) {
-            System.err.println("ERASURE_RESTORE_FAILED: check isolated DB, ledger integrity, key ring and runbook");
+            System.err.println("ERASURE_RESTORE_FAILED: " + stage);
             System.exit(1);
         }
     }

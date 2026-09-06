@@ -56,7 +56,13 @@ class AccountRestoreRehearsalLiveTest {
                 stage = "encrypted-backup-import-and-replay";
                 var command = List.of("bash","scripts/mysql-restore-erasure-verify.sh",backup.toString());
                 var result = process(command, env);
-                if (result.exit() != 0 || !result.output().contains("ERASURE_REHEARSAL_OK before_users=2 after_users=1 reports=1 toilets=1")
+                if (result.exit() != 0) {
+                    // Only fixed script/CLI codes; never dump process output, SQL, or environment.
+                    String code = result.output().lines().filter(line -> line.matches("ERASURE_(REHEARSAL|RESTORE)_FAILED: [a-zA-Z0-9 ;,.-]+"))
+                            .reduce((a,b) -> a+" | "+b).orElse("subprocess-exit-"+result.exit());
+                    throw new AssertionError("RESTORE_REHEARSAL_FAILED " + code);
+                }
+                if (!result.output().contains("ERASURE_REHEARSAL_OK before_users=2 after_users=1 reports=1 toilets=1")
                         || !result.output().contains("dryRun=false records=1 matched=1 absent=0 erased=1")
                         || !result.output().contains("dryRun=true records=1 matched=0 absent=1 erased=0")) throw new IllegalStateException();
                 stage = "inventory-mismatch-must-fail";

@@ -39,10 +39,15 @@ jobs:
           ACCOUNT_ERASURE_ENABLED: 'false'
         run: ./gradlew test --tests '*AccountRestoreRehearsalLiveTest' --rerun-tasks --no-daemon --console=plain
       - name: Require actual test execution and no disposable containers left
+        if: always()
         run: |
           python3 - <<'PY'
           import xml.etree.ElementTree as ET
           r = ET.parse('build/test-results/test/TEST-com.geupddong.account.AccountRestoreRehearsalLiveTest.xml').getroot()
+          for failure in r.findall('.//failure'):
+              message = failure.get('message', '')
+              if message.startswith('java.lang.AssertionError: RESTORE_REHEARSAL_'):
+                  print(message[:300])
           assert r.get('tests') == '1' and all(r.get(k) == '0' for k in ['failures', 'errors', 'skipped'])
           print('Encrypted restore, erasure replay, inventory refusal and synthetic cleanup passed')
           PY

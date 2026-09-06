@@ -79,10 +79,14 @@ before_users="$(mysql_query -e 'SELECT COUNT(*) FROM toilet_db.app_user;')"
 before_reports="$(mysql_query -e 'SELECT COUNT(*) FROM toilet_db.toilet_report;')"
 before_toilets="$(mysql_query -e 'SELECT COUNT(*) FROM toilet_db.toilet;')"
 run_tool() { java -cp "$tool_dir/lib/*" com.example.toiletbatch.account.AccountErasureRestoreCli "$@"; }
-run_tool --dry-run >"$work_dir/dry.out" 2>>"$work_dir/private-errors.log" || fail 'dry-run; check keyring, inventory and identity'
+restore_failure() {
+  grep -E '^ERASURE_RESTORE_FAILED: (arguments|database-guard|ledger-configuration|ledger-snapshot|database-replay)$' "$work_dir/private-errors.log" >&2 || true
+  fail "$1"
+}
+run_tool --dry-run >"$work_dir/dry.out" 2>>"$work_dir/private-errors.log" || restore_failure 'dry-run; check keyring, inventory and identity'
 grep -Eq '^dryRun=true records=[0-9]+ matched=[0-9]+ absent=[0-9]+ erased=0$' "$work_dir/dry.out" || fail 'unexpected dry-run output'
-run_tool --apply >"$work_dir/apply.out" 2>>"$work_dir/private-errors.log" || fail 'isolated erasure replay'
-run_tool --dry-run >"$work_dir/after.out" 2>>"$work_dir/private-errors.log" || fail 'post-erasure verification'
+run_tool --apply >"$work_dir/apply.out" 2>>"$work_dir/private-errors.log" || restore_failure 'isolated erasure replay'
+run_tool --dry-run >"$work_dir/after.out" 2>>"$work_dir/private-errors.log" || restore_failure 'post-erasure verification'
 grep -Eq '^dryRun=true records=[0-9]+ matched=0 absent=[0-9]+ erased=0$' "$work_dir/after.out" || fail 'matched identities remain'
 after_users="$(mysql_query -e 'SELECT COUNT(*) FROM toilet_db.app_user;')"
 after_reports="$(mysql_query -e 'SELECT COUNT(*) FROM toilet_db.toilet_report;')"
