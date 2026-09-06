@@ -1,6 +1,9 @@
 name: Independent checkpoint read-only readiness
 on:
   workflow_dispatch:
+  push:
+    branches: [feature/account-withdrawal-retention]
+    paths: ['.github/workflows/checkpoint-readiness-readonly.yml']
 permissions:
   contents: read
 jobs:
