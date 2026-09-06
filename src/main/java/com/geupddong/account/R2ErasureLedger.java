@@ -72,5 +72,56 @@ public final class R2ErasureLedger implements ErasureLedger {
     }
 
     @Override public void close() { s3.close(); }
+
+    /** Write-once completion; retries retain the FIRST observation, never overwrite its time. */
+    public ErasureCompletion ensureCompletion(ErasureCompletion proposed) {
+        try {
+            if (!realm.equals(proposed.realm())) throw unavailable();
+            var intent = readOrAbsent("v1/" + realm + "/" + proposed.withdrawalKey() + ".bin");
+            if (intent == null || !ErasureCompletion.digest(intent).equals(proposed.intentDigest())) throw unavailable();
+            var eligible = java.time.LocalDateTime.parse(intent.eligibleAt())
+                    .atZone(java.time.ZoneId.of("Asia/Seoul")).toInstant();
+            if (java.time.Instant.parse(proposed.firstConfirmedAbsentAt()).isBefore(eligible)) throw unavailable();
+            var existing = readCompletion(proposed);
+            if (existing == null) {
+                var json = new com.fasterxml.jackson.databind.ObjectMapper();
+                byte[] encrypted = cipher.encryptDocument(realm, proposed.objectKey(), json.writeValueAsBytes(proposed));
+                try {
+                    s3.putObject(PutObjectRequest.builder().bucket(bucket).key(proposed.objectKey())
+                            .ifNoneMatch("*").contentType("application/octet-stream").cacheControl("no-store")
+                            .storageClass(StorageClass.STANDARD).build(), RequestBody.fromBytes(encrypted));
+                } catch (S3Exception race) {
+                    if (race.statusCode() != 412) throw unavailable();
+                }
+                existing = readCompletion(proposed);
+            }
+            if (existing == null) throw unavailable();
+            if (java.time.Instant.parse(existing.firstConfirmedAbsentAt()).isBefore(eligible)) throw unavailable();
+            return existing;
+        } catch (Exception ignored) { throw unavailable(); }
+    }
+
+    /** A future first observation or an identity/epoch mismatch fails closed. */
+    public ErasureCompletion readCompletion(ErasureCompletion expected) {
+        try {
+            if (!realm.equals(expected.realm())) throw unavailable();
+            byte[] payload;
+            try {
+                payload = s3.getObjectAsBytes(GetObjectRequest.builder().bucket(bucket)
+                        .key(expected.objectKey()).build()).asByteArray();
+            } catch (S3Exception error) {
+                if (error.statusCode() == 404) return null;
+                throw unavailable();
+            }
+            var actual = new com.fasterxml.jackson.databind.ObjectMapper().readValue(
+                    cipher.decryptDocument(realm, expected.objectKey(), payload), ErasureCompletion.class);
+            if (!actual.objectKey().equals(expected.objectKey())
+                    || !actual.intentDigest().equals(expected.intentDigest())
+                    || java.time.Instant.parse(actual.firstConfirmedAbsentAt())
+                        .isAfter(java.time.Instant.parse(expected.firstConfirmedAbsentAt()))) throw unavailable();
+            return actual;
+        } catch (Exception ignored) { throw unavailable(); }
+    }
+
     private static IllegalStateException unavailable() { return new IllegalStateException("ERASURE_LEDGER_UNAVAILABLE"); }
 }

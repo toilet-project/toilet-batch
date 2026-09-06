@@ -34,19 +34,34 @@ public final class ErasureCipher {
     }
 
     public byte[] encrypt(ErasureRecord record) {
+        try { return encryptDocument(record.realm(), record.objectKey(), json.writeValueAsBytes(record)); }
+        catch (Exception ignored) { throw failure(); }
+    }
+
+    /** Authenticated envelope for typed evidence documents; caller validates the decoded schema. */
+    public byte[] encryptDocument(String realm, String objectKey, byte[] plaintext) {
         try {
+            if (plaintext == null || plaintext.length > 8000) throw failure();
             byte[] id = activeKey.getBytes(StandardCharsets.US_ASCII);
             byte[] nonce = new byte[12]; random.nextBytes(nonce);
             var cipher = Cipher.getInstance("AES/GCM/NoPadding");
             cipher.init(Cipher.ENCRYPT_MODE, keys.get(activeKey), new GCMParameterSpec(128, nonce));
-            cipher.updateAAD(aad(activeKey, record.realm(), record.objectKey()));
-            byte[] payload = cipher.doFinal(json.writeValueAsBytes(record));
+            cipher.updateAAD(aad(activeKey, realm, objectKey));
+            byte[] payload = cipher.doFinal(plaintext);
             return ByteBuffer.allocate(5 + id.length + 12 + payload.length)
                     .put(MAGIC).put((byte)id.length).put(id).put(nonce).put(payload).array();
         } catch (Exception ignored) { throw failure(); }
     }
 
     public ErasureRecord decrypt(String realm, String objectKey, byte[] envelope) {
+        try {
+            var record = json.readValue(decryptDocument(realm, objectKey, envelope), ErasureRecord.class);
+            if (!realm.equals(record.realm()) || !objectKey.equals(record.objectKey())) throw failure();
+            return record;
+        } catch (Exception ignored) { throw failure(); }
+    }
+
+    public byte[] decryptDocument(String realm, String objectKey, byte[] envelope) {
         try {
             if (envelope.length < 34 || envelope.length > 8192) throw failure();
             var input = ByteBuffer.wrap(envelope);
@@ -62,9 +77,7 @@ public final class ErasureCipher {
             var cipher = Cipher.getInstance("AES/GCM/NoPadding");
             cipher.init(Cipher.DECRYPT_MODE, key, new GCMParameterSpec(128, nonce));
             cipher.updateAAD(aad(keyId, realm, objectKey));
-            var record = json.readValue(cipher.doFinal(payload), ErasureRecord.class);
-            if (!realm.equals(record.realm()) || !objectKey.equals(record.objectKey())) throw failure();
-            return record;
+            return cipher.doFinal(payload);
         } catch (Exception ignored) { throw failure(); }
     }
 

@@ -35,7 +35,7 @@
 - account_erasure_completed_total, account_erasure_failed_total, account_erasure_overdue.
 - BATCH_FAILURE_WEBHOOK_URL의 기존 Discord 경로에 실행당 한 번, 실패/미완료/인프라 장애 건수만 전송한다. 회원 ID·주소·이메일·SQL·예외 원문은 보내지 않는다.
 - DB 장애 시 overdue는 마지막 측정값일 수 있으므로 infrastructureFailure=true를 함께 확인한다.
-- 성공 이력은 애플리케이션 로그/카운터이며 영구 삭제 완료 증빙을 대체하지 않는다. R2 파기 의도 선기록·복원 재적용은 feature에서 구현/격리 검증했다. 삭제 완료 증빙·독립 목록·보관 만료 실행은 아직 미구현이고 운영 활성화 차단 조건이다.
+- 성공 이력은 애플리케이션 로그/카운터이며 영구 삭제 완료 증빙을 대체하지 않는다. R2 파기 의도 선기록·복원 재적용은 feature에서 구현/격리 검증했다. 완료 증빙의 별도 CLI는 아래와 같이 구현했으나 독립 목록 자동 생성·운영 설치·보관 만료 실행은 아직 남아 있다.
 - 실패 건·상한 초과 잔여 건은 다음 일일 실행에서 처리한다. 백로그가 증가하면 운영자가 원인과 처리 상한을 검토한다.
 
 ## R2 정리 검토 정책 (실행 미연결)
@@ -46,4 +46,14 @@
 - 현재 DB 부재, 사본 범위/실제 제거, 복원 없음, 진행 중 백업/복원 없음, 독립 대장 목록, 키 복구, v1 보관 정책/만료 처리 확인 중 하나라도 없으면 보류한다.
 - 누락/미래/역전 시각과 24시간 초과한 증빙도 보류한다. 24시간은 검토 목록용이며 삭제 직전 재검증을 대체하지 않는다.
 - `REVIEW_CANDIDATE`도 삭제 승인이 아니다. 영속 완료 증빙·목록·실행 잠금·조건부 정리/재개 어댑터를 구현하고 검증하기 전 연결하지 않는다.
-- 이 클래스는 batch 전용 검토 도구이며 API와 공유하는 7개 파기 계약 소스에는 변경이 없다.
+- 이 클래스는 batch 전용 검토 도구다. 후속 완료 증빙 구현으로 API/배치 공유 계약은 8개 소스로 늘었다.
+
+## 완료 증빙 · 백업 진단 CLI (운영 미연결)
+
+`installErasureTools` 후 `java -cp 'build/erasure-tools/lib/*' com.example.toiletbatch.account.AccountErasureEvidenceCli --dry-run`으로 별도 실행한다. 기존 Spring 스케줄러/즉시 파기 트랜잭션에는 연결하지 않았다.
+
+- 기본 DB SELECT/R2 조회·목록 읽기만 수행. 명시적인 `--record-completions`만 R2 `completion-v1/<realm>/<databaseEpoch>/` 아래 암호화 증빙을 조건부 최초 기록한다. DB/백업/대장 삭제 기능은 없다.
+- 삭제 트랜잭션과 분리된 DB 부재 재조회, 의도 전체 사전 대조, ID 재사용 충돌, 파기 기한·복원 세대·최초 시각을 검증한다. R2 장애 후에는 의도 목록으로 재시도한다.
+- 운영자가 관련 작성자·복원을 중지하고 독립 의도 목록 파일/해시·서버 UUID/복원 세대를 제공해야 한다. 자동 잠금/독립 목록 생성은 아직 없다. 무인 타이머 등록 금지.
+- 암호화 백업 파일과 checksum을 비재귀 읽기 대조한다. mtime만으로 캡처 시점을 추정하지 않으며 빈 디렉터리도 전체 사본 제거를 증명하지 않는다. `retentionClearance=false`를 유지한다.
+- 상세 설정/제약은 docs 저장소 `operations/account-erasure-evidence-reconciliation-v1.md`를 참고한다. 실제 운영 통합 시험·배포는 별도 단계다.
