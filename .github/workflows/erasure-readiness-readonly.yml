@@ -35,4 +35,4 @@ jobs:
         run: |
           ./gradlew test --tests '*ErasureReadinessLiveTest' --no-daemon --console=plain
           # Test stdout is a fixed allowlisted set of non-identifying booleans.
-          sed -n '/R2_READONLY_BUCKET_ACCESS_OK/p; /R2_OBSERVED_BUCKET_EMPTY=/p; /R2_PRODUCTION_INTENT_PRESENT=/p; /R2_PRODUCTION_CATALOGUE_PRESENT=/p; /R2_BASELINE_ESTABLISHED=/p; /R2_OBJECT_CONTENTS_READ=/p' build/test-results/test/TEST-com.geupddong.account.ErasureReadinessLiveTest.xml >> "$GITHUB_STEP_SUMMARY"
+          sed -n '/R2_READONLY_BUCKET_ACCESS_OK/p; /R2_OBSERVED_BUCKET_EMPTY=/p; /R2_PRODUCTION_INTENT_PRESENT=/p; /R2_PRODUCTION_CATALOGUE_PRESENT=/p; /R2_BASELINE_ESTABLISHED=/p; /R2_OBJECT_CONTENTS_READ=/p' build/test-results/test/TEST-com.geupddong.account.ErasureReadinessLiveTest.xml | tee -a "$GITHUB_STEP_SUMMARY"
