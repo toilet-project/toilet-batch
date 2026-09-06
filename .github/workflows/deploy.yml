@@ -73,7 +73,9 @@ jobs:
         with:
           context: .
           push: true
-          tags: ${{ secrets.DOCKERHUB_USERNAME }}/toilet-batch:latest
+          tags: |
+            ${{ secrets.DOCKERHUB_USERNAME }}/toilet-batch:latest
+            ${{ secrets.DOCKERHUB_USERNAME }}/toilet-batch:${{ github.sha }}
 
       # 6. 미니 PC에 SSH 접속하여 배포 실행 (.env 자동 생성)
       - name: Deploy to Mini PC via SSH
@@ -84,9 +86,19 @@ jobs:
           username: ${{ secrets.MINI_PC_USERNAME }}
           key: ${{ secrets.MINI_PC_KEY }}
           script: |
+            set -eu
+            umask 077
             mkdir -p ~/toilet-batch
             cd ~/toilet-batch
             mkdir -p region-results
+
+            rollback_dir=$(mktemp -d "$PWD/rollback-preparation.XXXXXXXX")
+            for file in .env .account-lifecycle.env docker-compose.yml; do
+              if [ -f "$file" ]; then cp -p -- "$file" "$rollback_dir/"; fi
+            done
+            if docker container inspect toilet-batch >/dev/null 2>&1; then
+              docker container inspect --format '{{.Image}}' toilet-batch > "$rollback_dir/batch-image-id"
+            fi
 
             # GitHub Secrets 내용으로 .env 파일 생성
             cat <<EOF > .env
@@ -114,10 +126,10 @@ jobs:
             printf '%s' '${{ steps.lifecycle.outputs.payload }}' | base64 --decode > .account-lifecycle.env
             chmod 600 .env .account-lifecycle.env
 
-            cat <<EOF > docker-compose.yml
+            cat <<'EOF' > docker-compose.yml
             services:
               toilet-batch:
-                image: ${{ secrets.DOCKERHUB_USERNAME }}/toilet-batch:latest
+                image: ${{ secrets.DOCKERHUB_USERNAME }}/toilet-batch:${{ github.sha }}
                 container_name: toilet-batch
                 restart: unless-stopped
                 env_file:
@@ -138,6 +150,6 @@ jobs:
                 external: true
             EOF
 
+            docker compose -f docker-compose.yml config --quiet
             docker compose -f docker-compose.yml pull
-            docker compose -f docker-compose.yml up -d
-            docker image prune -f --filter "until=24h"
+            docker compose -f docker-compose.yml up -d --wait --wait-timeout 120 toilet-batch
