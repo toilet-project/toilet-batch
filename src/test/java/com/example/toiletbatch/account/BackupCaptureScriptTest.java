@@ -61,4 +61,10 @@ class BackupCaptureScriptTest {
         Path busy=directory.resolve("busy");assertNotEquals(0,run(busy,false,true));
         try(var files=Files.list(busy)){assertEquals(1,files.count());} // only the advisory lock fixture
     }
+    @Test void anomalousLockIsPreservedInsteadOfTruncated()throws Exception {
+        setup();Path backups=Files.createDirectory(directory.resolve("anomalous-lock"));
+        Path lock=backups.resolve(".backup.lock");Files.writeString(lock,"SYNTHETIC_LOCK_ANOMALY");
+        assertNotEquals(0,run(backups,false,false));assertEquals("SYNTHETIC_LOCK_ANOMALY",Files.readString(lock));
+        try(var files=Files.list(backups)){assertEquals(1,files.count());}
+    }
 }
