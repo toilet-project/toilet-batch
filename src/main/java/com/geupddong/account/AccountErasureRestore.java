@@ -32,7 +32,7 @@ public final class AccountErasureRestore {
             // Validate all identities before changing ANY row. Apply locks in a stable order.
             for (var record : ordered) {
                 var dates = jdbc.query("SELECT created_at FROM app_user WHERE user_id=?" + (apply ? " FOR UPDATE" : ""),
-                        (rs, row) -> rs.getTimestamp(1).toLocalDateTime(), record.userId());
+                        (rs, row) -> rs.getObject(1, LocalDateTime.class), record.userId());
                 if (dates.isEmpty()) { absent++; continue; }
                 if (!dates.getFirst().equals(LocalDateTime.parse(record.userCreatedAt())))
                     throw new IllegalStateException("ERASURE_RESTORE_IDENTITY_CONFLICT");

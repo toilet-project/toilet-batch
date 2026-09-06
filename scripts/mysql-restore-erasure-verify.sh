@@ -51,17 +51,17 @@ network_id="$(docker network create --internal --label "geupddong.erasure.verify
 phase=container-create
 container_id="$(docker run -d --name "$container_name" --network "$network_name" \
   --label "geupddong.erasure.verify=$run_id" --memory 1g --cpus 1 \
-  -p 127.0.0.1::3306 -e MYSQL_ROOT_PASSWORD -e MYSQL_ROOT_HOST=% mysql:8.0.46 \
-  --skip-log-bin --event-scheduler=OFF --local-infile=OFF --secure-file-priv=NULL \
+  -e MYSQL_ROOT_PASSWORD -e MYSQL_ROOT_HOST=% mysql:8.0.46 \
+  --port=43317 --skip-log-bin --event-scheduler=OFF --local-infile=OFF --secure-file-priv=NULL \
   --default-time-zone=+09:00 --max-allowed-packet=1073741824)"
 unset MYSQL_ROOT_PASSWORD
 phase=container-ready
 [[ "$container_id" =~ ^[a-f0-9]{64}$ && "$(docker network inspect -f '{{.Internal}}' "$network_id")" == true ]] || fail 'isolation failed'
 for _ in $(seq 1 60); do
-  if docker exec -e MYSQL_PWD "$container_id" mysqladmin --protocol=tcp -h127.0.0.1 -uroot ping --silent >/dev/null 2>&1; then break; fi
+  if docker exec -e MYSQL_PWD "$container_id" mysqladmin --protocol=tcp -h127.0.0.1 -P43317 -uroot ping --silent >/dev/null 2>&1; then break; fi
   sleep 2
 done
-docker exec -e MYSQL_PWD "$container_id" mysqladmin --protocol=tcp -h127.0.0.1 -uroot ping --silent >/dev/null 2>&1 || fail 'isolated MySQL startup'
+docker exec -e MYSQL_PWD "$container_id" mysqladmin --protocol=tcp -h127.0.0.1 -P43317 -uroot ping --silent >/dev/null 2>&1 || fail 'isolated MySQL startup'
 mysql_query() { docker exec -i -e MYSQL_PWD "$container_id" mysql -uroot --batch --skip-column-names "$@" 2>>"$work_dir/private-errors.log"; }
 phase=backup-import
 if ! openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass "file:$key_file" -in "$backup_file" 2>>"$work_dir/private-errors.log" \
@@ -70,12 +70,13 @@ if ! openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass "file:$key_file" -in
 [[ "$(mysql_query -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='toilet_db' AND table_name='erasure_restore_guard';")" == 0 ]] || fail 'unexpected pre-existing restore guard'
 phase=guard-create
 mysql_query -e "CREATE TABLE toilet_db.erasure_restore_guard(marker CHAR(32) NOT NULL PRIMARY KEY); INSERT INTO toilet_db.erasure_restore_guard VALUES('$run_id');"
-phase=published-port
-port_binding="$(docker port "$container_id" 3306/tcp)"
-[[ "$port_binding" =~ ^127\.0\.0\.1:([0-9]{4,5})$ ]] || fail 'restore endpoint is not loopback only'
-restore_port="${BASH_REMATCH[1]}"
-[[ "$restore_port" != 3306 ]] || fail 'production port refused'
-export ERASURE_RESTORE_URL="jdbc:mysql://127.0.0.1:$restore_port/toilet_db"
+phase=internal-endpoint
+[[ "$(docker inspect -f '{{len .NetworkSettings.Networks}}' "$container_id")" == 1 ]] || fail 'unexpected extra network'
+[[ -z "$(docker port "$container_id")" ]] || fail 'published ports are forbidden'
+restore_ip="$(docker inspect -f "{{(index .NetworkSettings.Networks \"$network_name\").IPAddress}}" "$container_id")"
+[[ "$restore_ip" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]] || fail 'invalid isolated address'
+export ERASURE_RESTORE_CONTAINER_IP="$restore_ip"
+export ERASURE_RESTORE_URL="jdbc:mysql://$restore_ip:43317/toilet_db"
 export ERASURE_RESTORE_MARKER="$run_id"
 phase=server-identity
 export ERASURE_RESTORE_SERVER_UUID="$(mysql_query -e 'SELECT @@server_uuid;')"

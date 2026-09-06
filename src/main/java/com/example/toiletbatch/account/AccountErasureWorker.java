@@ -39,11 +39,11 @@ public class AccountErasureWorker {
             var deadlines = jdbc.query("SELECT purge_after, next_attempt_at FROM account_withdrawal "
                     + "WHERE user_id=? FOR UPDATE",
                     (rs, row) -> new LocalDateTime[] {
-                            rs.getTimestamp(1).toLocalDateTime(), rs.getTimestamp(2).toLocalDateTime() }, id);
+                            rs.getObject(1, LocalDateTime.class), rs.getObject(2, LocalDateTime.class) }, id);
             if (deadlines.isEmpty() || deadlines.getFirst()[0].isAfter(cutoff)
                     || deadlines.getFirst()[1].isAfter(cutoff)) return false;
             var createdAt = jdbc.queryForObject("SELECT created_at FROM app_user WHERE user_id=?",
-                    java.sql.Timestamp.class, id).toLocalDateTime();
+                    LocalDateTime.class, id);
             var withdrawalKey = jdbc.queryForObject("SELECT withdrawal_key FROM account_withdrawal WHERE user_id=?",
                     String.class, id);
             ledger.ensureRecorded(new com.geupddong.account.ErasureRecord(1, realm, id,
