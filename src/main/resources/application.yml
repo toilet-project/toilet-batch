@@ -82,6 +82,7 @@ management:
 erasure:
   ledger:
     enabled: ${ERASURE_LEDGER_ENABLED:false}
+    catalogue-enabled: ${ERASURE_LEDGER_CATALOGUE_ENABLED:false}
     realm: ${ERASURE_LEDGER_REALM:production}
     bucket: ${ERASURE_LEDGER_BUCKET:geupddong-account-erasure-ledger}
     endpoint: ${ERASURE_LEDGER_ENDPOINT:}

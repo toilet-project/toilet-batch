@@ -48,6 +48,11 @@ dependencies {
 }
 
 tasks.named('test') {
+    inputs.property('erasureBackupBash', System.getenv('ERASURE_BACKUP_BASH') ?: '')
+    inputs.property('erasureBackupScriptPath', System.getenv('ERASURE_BACKUP_SCRIPT') ?: '')
+    if (System.getenv('ERASURE_BACKUP_SCRIPT')) {
+        inputs.file(System.getenv('ERASURE_BACKUP_SCRIPT')).withPropertyName('erasureBackupScript')
+    }
     inputs.property('accountRetentionMySqlMarker', System.getenv('ACCOUNT_RETENTION_MYSQL_MARKER') ?: '')
     inputs.property('accountRetentionMySqlPort', System.getenv('ACCOUNT_RETENTION_MYSQL_PORT') ?: '')
     useJUnitPlatform()

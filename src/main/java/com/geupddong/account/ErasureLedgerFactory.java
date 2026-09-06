@@ -46,7 +46,8 @@ public final class ErasureLedgerFactory {
                     .responseChecksumValidation(ResponseChecksumValidation.WHEN_REQUIRED)
                     .overrideConfiguration(c -> c.apiCallTimeout(Duration.ofSeconds(15)).apiCallAttemptTimeout(Duration.ofSeconds(5)))
                     .build();
-            return new R2ErasureLedger(client, cipher, bucket, realm);
+            return new R2ErasureLedger(client, cipher, bucket, realm,
+                    env.getProperty("erasure.ledger.catalogue-enabled", Boolean.class, false));
         } catch (Exception ignored) { throw new IllegalStateException("ERASURE_LEDGER_CONFIGURATION_INVALID"); }
     }
 }

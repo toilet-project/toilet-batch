@@ -8,15 +8,19 @@ import java.util.*;
 
 /** Read-only, non-recursive scan. No decrypt, cleanup, timestamp repair or DB access. */
 public record BackupEvidenceInventory(Instant scannedAt, List<Entry> files, int unclassifiedEntries) {
-    public record Entry(String filename, String sha256, long bytes, Instant modifiedAt) { }
+    public record Entry(String filename, String sha256, long bytes, Instant modifiedAt, BackupCaptureMetadata capture) {
+        public Entry(String filename, String sha256, long bytes, Instant modifiedAt) { this(filename, sha256, bytes, modifiedAt, null); }
+    }
     public record Comparison(int dumpFiles, int modifiedBeforeConfirmation,
-                             int captureMetadataUnknown, boolean allCopiesCleared) { }
+                             int captureMetadataUnknown, int captureStartedBeforeConfirmation, boolean allCopiesCleared) { }
     public BackupEvidenceInventory { files = List.copyOf(files); }
 
     public Comparison compare(Instant confirmedAbsentAt) {
         int before = (int) files.stream().filter(f -> !f.modifiedAt().isAfter(confirmedAbsentAt)).count();
         // Even an empty directory says nothing about logs/other copies; never issue clearance.
-        return new Comparison(files.size(), before, files.size(), false);
+        int capturedBefore = (int)files.stream().filter(f -> f.capture() != null
+                && !Instant.parse(f.capture().captureStartedAt()).isAfter(confirmedAbsentAt)).count();
+        return new Comparison(files.size(), before, (int)files.stream().filter(f -> f.capture() == null).count(), capturedBefore, false);
     }
 
     public static BackupEvidenceInventory scan(Path approvedDirectory, Instant now) {
@@ -27,12 +31,16 @@ public record BackupEvidenceInventory(Instant scannedAt, List<Entry> files, int 
             var entries = new ArrayList<Entry>();
             var names = new HashSet<String>();
             var sidecars = new HashSet<String>();
+            var manifests = new HashSet<String>();
             int unknown = 0, count = 0;
             try (var stream = Files.newDirectoryStream(root)) {
                 for (Path file : stream) {
                     if (++count > 20000) throw invalid();
                     String name = file.getFileName().toString();
                     if (!Files.isRegularFile(file, LinkOption.NOFOLLOW_LINKS)) { unknown++; continue; }
+                    if (name.matches("toilet-db-[0-9]{8}-[0-9]{6}\\.sql\\.gz\\.enc\\.metadata\\.json")) {
+                        manifests.add(name.substring(0, name.length() - 14)); continue;
+                    }
                     if (name.matches("toilet-db-[0-9]{8}-[0-9]{6}\\.sql\\.gz\\.enc\\.sha256")) {
                         sidecars.add(name.substring(0, name.length() - 7)); continue;
                     }
@@ -62,10 +70,23 @@ public record BackupEvidenceInventory(Instant scannedAt, List<Entry> files, int 
                     if (checksum.length > 1024 || !(text.equals(hash + "  " + name)
                             || text.equals(hash + "  " + file.toString()))) throw invalid();
                     names.add(name);
-                    entries.add(new Entry(name, hash, total, before.lastModifiedTime().toInstant()));
+                    BackupCaptureMetadata capture = null;
+                    Path metadata = root.resolve(name + ".metadata.json");
+                    if (Files.exists(metadata, LinkOption.NOFOLLOW_LINKS)) {
+                        byte[] json;
+                        try (var in = Files.newInputStream(metadata, LinkOption.NOFOLLOW_LINKS)) { json = in.readNBytes(4097); }
+                        if (json.length > 4096) throw invalid();
+                        var factory = new com.fasterxml.jackson.core.JsonFactory();
+                        factory.enable(com.fasterxml.jackson.core.JsonParser.Feature.STRICT_DUPLICATE_DETECTION);
+                        capture = new com.fasterxml.jackson.databind.ObjectMapper(factory).readValue(json, BackupCaptureMetadata.class);
+                        if (!name.equals(capture.filename()) || !hash.equals(capture.sha256()) || total != capture.bytes()
+                                || Instant.parse(capture.captureCompletedAt()).isAfter(now)) throw invalid();
+                    }
+                    entries.add(new Entry(name, hash, total, before.lastModifiedTime().toInstant(), capture));
                 }
             }
             sidecars.removeAll(names); unknown += sidecars.size();
+            manifests.removeAll(names); unknown += manifests.size();
             entries.sort(Comparator.comparing(Entry::filename));
             return new BackupEvidenceInventory(now, entries, unknown);
         } catch (Exception ignored) { throw invalid(); }

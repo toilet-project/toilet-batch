@@ -12,13 +12,20 @@ public final class R2ErasureLedger implements ErasureLedger {
     private final ErasureCipher cipher;
     private final String bucket;
     private final String realm;
+    private final boolean catalogueEnabled;
     public R2ErasureLedger(S3Client s3, ErasureCipher cipher, String bucket, String realm) {
+        this(s3, cipher, bucket, realm, false);
+    }
+    public R2ErasureLedger(S3Client s3, ErasureCipher cipher, String bucket, String realm, boolean catalogueEnabled) {
         this.s3 = s3; this.cipher = cipher; this.bucket = bucket; this.realm = realm;
+        this.catalogueEnabled = catalogueEnabled;
     }
 
     @Override public void ensureRecorded(ErasureRecord record) {
         if (!realm.equals(record.realm())) throw unavailable();
         try {
+            // A separately written source, not a LIST-derived copy made after deletion.
+            if (catalogueEnabled) ensureCatalogued(record);
             ErasureRecord existing = readOrAbsent(record.objectKey());
             if (existing == null) {
                 try {
@@ -46,6 +53,14 @@ public final class R2ErasureLedger implements ErasureLedger {
 
     /** Fetch/verify the entire requested snapshot before restoring ANY database rows. */
     public List<ErasureRecord> readAll(int expectedObjects) {
+        return readSnapshot(expectedObjects, false);
+    }
+
+    public List<ErasureRecord> readCatalogue(int expectedObjects) {
+        return readSnapshot(expectedObjects, true);
+    }
+
+    private List<ErasureRecord> readSnapshot(int expectedObjects, boolean catalogue) {
         if (expectedObjects < 0 || expectedObjects > 1000000) throw unavailable();
         try {
             var records = new ArrayList<ErasureRecord>();
@@ -54,11 +69,12 @@ public final class R2ErasureLedger implements ErasureLedger {
             String token = null;
             do {
                 var page = s3.listObjectsV2(ListObjectsV2Request.builder().bucket(bucket)
-                        .prefix("v1/" + realm + "/").continuationToken(token).maxKeys(1000).build());
+                        .prefix((catalogue ? "catalogue-v1/" : "v1/") + realm + "/")
+                        .continuationToken(token).maxKeys(1000).build());
                 for (var item : page.contents()) {
                     if (!seenKeys.add(item.key())) throw unavailable();
                     if (records.size() >= expectedObjects || item.size() > 8192) throw unavailable();
-                    var record = readOrAbsent(item.key());
+                    var record = catalogue ? readCatalogueOrAbsent(item.key()) : readOrAbsent(item.key());
                     if (record == null) throw unavailable();
                     records.add(record);
                 }
@@ -72,6 +88,43 @@ public final class R2ErasureLedger implements ErasureLedger {
     }
 
     @Override public void close() { s3.close(); }
+
+    private String catalogueKey(ErasureRecord record) {
+        return "catalogue-v1/" + realm + "/" + record.withdrawalKey() + ".bin";
+    }
+
+    private ErasureRecord readCatalogueOrAbsent(String key) {
+        try {
+            byte[] payload = s3.getObjectAsBytes(GetObjectRequest.builder().bucket(bucket).key(key).build()).asByteArray();
+            var record = new com.fasterxml.jackson.databind.ObjectMapper().readValue(
+                    cipher.decryptDocument(realm, key, payload), ErasureRecord.class);
+            if (!realm.equals(record.realm()) || !catalogueKey(record).equals(key)) throw unavailable();
+            return record;
+        } catch (S3Exception missing) {
+            if (missing.statusCode() == 404) return null;
+            throw unavailable();
+        } catch (Exception ignored) { throw unavailable(); }
+    }
+
+    private void ensureCatalogued(ErasureRecord record) {
+        try {
+            String key = catalogueKey(record);
+            var existing = readCatalogueOrAbsent(key);
+            if (existing == null) {
+                byte[] bytes = cipher.encryptDocument(realm, key,
+                        new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsBytes(record));
+                try {
+                    s3.putObject(PutObjectRequest.builder().bucket(bucket).key(key).ifNoneMatch("*")
+                            .contentType("application/octet-stream").cacheControl("no-store")
+                            .storageClass(StorageClass.STANDARD).build(), RequestBody.fromBytes(bytes));
+                } catch (S3Exception race) {
+                    if (race.statusCode() != 412) throw unavailable();
+                }
+                existing = readCatalogueOrAbsent(key);
+            }
+            if (!record.equals(existing)) throw unavailable();
+        } catch (Exception ignored) { throw unavailable(); }
+    }
 
     /** Write-once completion; retries retain the FIRST observation, never overwrite its time. */
     public ErasureCompletion ensureCompletion(ErasureCompletion proposed) {

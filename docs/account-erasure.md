@@ -50,6 +50,10 @@
 
 ## 완료 증빙 · 백업 진단 CLI (운영 미연결)
 
+후속 구현: `ERASURE_LEDGER_CATALOGUE_ENABLED=false` 기본값. true이면 API/배치가 `catalogue-v1/`를 기존 의도보다 먼저 조건부 기록/검증한다. `ErasureCatalogueExportCli --dry-run|--export`로 별도 기대 건수와 비교하여 증빙 도구 입력을 생성한다. 같은 R2 안의 두 경로이며 버킷 전체 손실에 대한 독립 백업은 아니다. 신뢰 기준 자동 보존·복원 세대 회전은 아직 운영 조건이다.
+
+`BackupCaptureMetadata`와 스캐너는 `.metadata.json`의 암호화 파일 해시·크기·시각·DB 식별 형식을 확인하고 캡처 시작 기준으로 진단한다. 없는 metadata를 파일 날짜로 생성하지 않으며 전체 사본 제거 확인은 계속 false다. docs의 새 백업 스크립트는 만료 삭제를 분리했으므로 독립 정리 도구와 함께 준비하기 전 운영 설치하면 안 된다.
+
 `installErasureTools` 후 `java -cp 'build/erasure-tools/lib/*' com.example.toiletbatch.account.AccountErasureEvidenceCli --dry-run`으로 별도 실행한다. 기존 Spring 스케줄러/즉시 파기 트랜잭션에는 연결하지 않았다.
 
 - 기본 DB SELECT/R2 조회·목록 읽기만 수행. 명시적인 `--record-completions`만 R2 `completion-v1/<realm>/<databaseEpoch>/` 아래 암호화 증빙을 조건부 최초 기록한다. DB/백업/대장 삭제 기능은 없다.
