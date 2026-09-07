@@ -78,14 +78,28 @@ jobs:
             ${{ secrets.DOCKERHUB_USERNAME }}/toilet-batch:${{ github.sha }}
 
       # 6. 미니 PC에 SSH 접속하여 배포 실행 (.env 자동 생성)
-      - name: Deploy to Mini PC via SSH
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.MINI_PC_HOST }}
-          port: ${{ secrets.MINI_PC_PORT }}
-          username: ${{ secrets.MINI_PC_USERNAME }}
-          key: ${{ secrets.MINI_PC_KEY }}
-          script: |
+      - name: Prepare pinned Tunnel SSH transport
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' --tlsv1.2 \
+            --connect-timeout 10 --max-time 60 \
+            https://github.com/cloudflare/cloudflared/releases/download/2026.8.3/cloudflared-linux-amd64.deb \
+            -o "$RUNNER_TEMP/cloudflared.deb"
+          printf '%s  %s\n' 660b348d473bba81997445b534e7eaefaf4c4e16331866922326c338a7013dd9 "$RUNNER_TEMP/cloudflared.deb" | sha256sum -c -
+          dpkg-deb --extract "$RUNNER_TEMP/cloudflared.deb" "$RUNNER_TEMP/cloudflared-package"
+
+      - name: Deploy to Mini PC through Tunnel
+        shell: bash
+        env:
+          TUNNEL_SERVICE_TOKEN_ID: ${{ secrets.TUNNEL_DEPLOY_ACCESS_CLIENT_ID }}
+          TUNNEL_SERVICE_TOKEN_SECRET: ${{ secrets.TUNNEL_DEPLOY_ACCESS_CLIENT_SECRET }}
+          DEPLOY_SSH_KEY: ${{ secrets.MINI_PC_KEY }}
+          TUNNEL_KNOWN_HOSTS: ${{ secrets.TUNNEL_DEPLOY_SSH_KNOWN_HOSTS }}
+          TUNNEL_SSH_HOST: ${{ vars.TUNNEL_DEPLOY_SSH_HOST }}
+          TUNNEL_SSH_USER: ${{ secrets.MINI_PC_USERNAME }}
+          DEPLOY_SCRIPT: |
             set -eu
             umask 077
             mkdir -p ~/toilet-batch
@@ -153,3 +167,35 @@ jobs:
             docker compose -f docker-compose.yml config --quiet
             docker compose -f docker-compose.yml pull
             docker compose -f docker-compose.yml up -d --wait --wait-timeout 120 toilet-batch
+        run: |
+          set -euo pipefail
+          umask 077
+          : "${TUNNEL_SERVICE_TOKEN_ID:?missing Access ID}"
+          : "${TUNNEL_SERVICE_TOKEN_SECRET:?missing Access secret}"
+          : "${DEPLOY_SSH_KEY:?missing existing deploy key}"
+          : "${TUNNEL_KNOWN_HOSTS:?missing pinned host keys}"
+          test "$TUNNEL_SSH_HOST" = 'ssh-deploy.geupddong.com'
+          [[ "$TUNNEL_SSH_USER" =~ ^[a-z_][a-z0-9_-]*$ ]]
+          printf '%s\n' "$DEPLOY_SSH_KEY" > "$RUNNER_TEMP/tunnel-deploy-key"
+          printf '%s\n' "$TUNNEL_KNOWN_HOSTS" > "$RUNNER_TEMP/tunnel-known-hosts"
+          printf '%s\n' "$DEPLOY_SCRIPT" > "$RUNNER_TEMP/tunnel-deploy-script"
+          ssh-keygen -y -P '' -f "$RUNNER_TEMP/tunnel-deploy-key" >/dev/null
+          bash -n "$RUNNER_TEMP/tunnel-deploy-script"
+          export PATH="$RUNNER_TEMP/cloudflared-package/usr/bin:$PATH"
+          # No automatic retry: a lost connection does not imply the remote deploy stopped.
+          timeout 10m ssh -F /dev/null -T -i "$RUNNER_TEMP/tunnel-deploy-key" \
+            -o IdentitiesOnly=yes -o BatchMode=yes -o PasswordAuthentication=no \
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$RUNNER_TEMP/tunnel-known-hosts" \
+            -o HostKeyAlias=geupddong-mini-pc -o HostKeyAlgorithms=ssh-ed25519 \
+            -o ForwardAgent=no -o ClearAllForwardings=yes \
+            -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=3 \
+            -o 'ProxyCommand=cloudflared access ssh --hostname %h' \
+            "$TUNNEL_SSH_USER@$TUNNEL_SSH_HOST" 'bash -s' < "$RUNNER_TEMP/tunnel-deploy-script"
+
+      - name: Remove ephemeral Tunnel deploy credentials
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${RUNNER_TEMP:?}"
+          rm -f -- "$RUNNER_TEMP/tunnel-deploy-key" "$RUNNER_TEMP/tunnel-known-hosts" "$RUNNER_TEMP/tunnel-deploy-script"

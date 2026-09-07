@@ -1,0 +1,27 @@
+name: Tunnel transport offline checks
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/deploy.yml'
+      - '.github/workflows/tunnel-transport-checks.yml'
+      - 'scripts/verify-tunnel-transport.cjs'
+permissions:
+  contents: read
+jobs:
+  verify-transport:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install pinned parser without lifecycle scripts
+        run: npm install --prefix "$RUNNER_TEMP/tunnel-validation" --ignore-scripts --no-audit --no-fund --package-lock=false yaml@2.9.0
+      - name: Verify baseline invariants and shell syntax without credentials
+        env:
+          TUNNEL_YAML_MODULE: ${{ runner.temp }}/tunnel-validation/node_modules/yaml
+          TUNNEL_BASH: /bin/bash
+        run: node scripts/verify-tunnel-transport.cjs
