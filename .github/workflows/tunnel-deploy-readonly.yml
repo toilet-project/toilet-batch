@@ -1,0 +1,95 @@
+# Read-only feature-branch verification. Never merges or runs deployment commands.
+name: Deployment Tunnel SSH read-only verification
+on:
+  push:
+    branches: [feature/tunnel-deploy-readonly-verification]
+    paths: [.github/workflows/tunnel-deploy-readonly.yml]
+permissions:
+  contents: read
+concurrency:
+  group: tunnel-deploy-readonly
+  cancel-in-progress: false
+jobs:
+  verify:
+    if: github.repository == 'toilet-project/toilet-batch' && github.ref == 'refs/heads/feature/tunnel-deploy-readonly-verification'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Download and verify pinned official connector
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' --tlsv1.2 \
+            --connect-timeout 10 --max-time 60 \
+            https://github.com/cloudflare/cloudflared/releases/download/2026.8.3/cloudflared-linux-amd64.deb \
+            -o "$RUNNER_TEMP/cloudflared.deb"
+          printf '%s  %s\n' 660b348d473bba81997445b534e7eaefaf4c4e16331866922326c338a7013dd9 "$RUNNER_TEMP/cloudflared.deb" | sha256sum -c -
+          dpkg-deb --extract "$RUNNER_TEMP/cloudflared.deb" "$RUNNER_TEMP/cloudflared-package"
+      - name: Verify authenticated read-only command and exit status
+        shell: bash
+        env:
+          TUNNEL_SERVICE_TOKEN_ID: ${{ secrets.TUNNEL_DEPLOY_ACCESS_CLIENT_ID }}
+          TUNNEL_SERVICE_TOKEN_SECRET: ${{ secrets.TUNNEL_DEPLOY_ACCESS_CLIENT_SECRET }}
+          DEPLOY_SSH_KEY: ${{ secrets.MINI_PC_KEY }}
+          TUNNEL_KNOWN_HOSTS: ${{ secrets.TUNNEL_DEPLOY_SSH_KNOWN_HOSTS }}
+          TUNNEL_SSH_HOST: ${{ vars.TUNNEL_DEPLOY_SSH_HOST }}
+          TUNNEL_SSH_USER: ${{ secrets.MINI_PC_USERNAME }}
+        run: |
+          set -euo pipefail
+          umask 077
+          : "${TUNNEL_SERVICE_TOKEN_ID:?missing Access ID}"
+          : "${TUNNEL_SERVICE_TOKEN_SECRET:?missing Access secret}"
+          : "${DEPLOY_SSH_KEY:?missing existing SSH key}"
+          : "${TUNNEL_KNOWN_HOSTS:?missing verified host key}"
+          test "$TUNNEL_SSH_HOST" = 'ssh-deploy.geupddong.com'
+          [[ "$TUNNEL_SSH_USER" =~ ^[a-z_][a-z0-9_-]*$ ]]
+          printf '%s\n' "$DEPLOY_SSH_KEY" > "$RUNNER_TEMP/tunnel-probe-key"
+          printf '%s\n' "$TUNNEL_KNOWN_HOSTS" > "$RUNNER_TEMP/tunnel-probe-known-hosts"
+          ssh-keygen -y -P '' -f "$RUNNER_TEMP/tunnel-probe-key" >/dev/null 2>&1
+          ssh-keygen -F geupddong-mini-pc -f "$RUNNER_TEMP/tunnel-probe-known-hosts" >/dev/null
+          export PATH="$RUNNER_TEMP/cloudflared-package/usr/bin:$PATH"
+          ssh_args=(-F /dev/null -T -i "$RUNNER_TEMP/tunnel-probe-key"
+            -o IdentitiesOnly=yes -o BatchMode=yes -o PasswordAuthentication=no
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$RUNNER_TEMP/tunnel-probe-known-hosts"
+            -o HostKeyAlias=geupddong-mini-pc -o HostKeyAlgorithms=ssh-ed25519
+            -o ForwardAgent=no -o ClearAllForwardings=yes -o LogLevel=ERROR
+            -o ConnectTimeout=15 -o ServerAliveInterval=10 -o ServerAliveCountMax=2
+            -o 'ProxyCommand=cloudflared access ssh --hostname %h'
+            "$TUNNEL_SSH_USER@$TUNNEL_SSH_HOST")
+          # Fixed remote read-only command. No checkout, sudo, Docker, files, or database changes.
+          if ! output=$(timeout 60s ssh "${ssh_args[@]}" \
+            '/usr/bin/printf "TUNNEL_READONLY_V1\n"; /usr/bin/id -un; /usr/bin/hostname' \
+            2>"$RUNNER_TEMP/tunnel-probe-error"); then
+            if grep -qi 'Permission denied' "$RUNNER_TEMP/tunnel-probe-error"; then
+              echo 'FAIL: SSH public-key authentication rejected.'
+            elif grep -qi 'host key verification failed\|REMOTE HOST IDENTIFICATION HAS CHANGED' "$RUNNER_TEMP/tunnel-probe-error"; then
+              echo 'FAIL: pinned host-key verification failed.'
+            else
+              echo 'FAIL: Access/SSH transport failed or timed out; no automatic retry.'
+            fi
+            exit 1
+          fi
+          mapfile -t lines <<< "$output"
+          test "${#lines[@]}" -eq 3
+          test "${lines[0]}" = TUNNEL_READONLY_V1
+          test "${lines[1]}" = "$TUNNEL_SSH_USER"
+          test -n "${lines[2]}"
+          echo 'PASS: repository token + SSH key + pinned host key + read-only command.'
+          # Check remote error propagation, without changing remote state.
+          set +e
+          timeout 60s ssh "${ssh_args[@]}" 'exit 23' \
+            >"$RUNNER_TEMP/tunnel-probe-exit-output" 2>"$RUNNER_TEMP/tunnel-probe-error"
+          code=$?
+          set -e
+          test "$code" -eq 23
+          echo 'PASS: remote exit status propagated exactly (23).'
+          echo 'No deployment, restart, or business-data mutation was performed.'
+      - name: Remove ephemeral runner credentials
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${RUNNER_TEMP:?}"
+          rm -f -- "$RUNNER_TEMP/tunnel-probe-key" "$RUNNER_TEMP/tunnel-probe-known-hosts" \
+            "$RUNNER_TEMP/tunnel-probe-error" "$RUNNER_TEMP/tunnel-probe-exit-output"
