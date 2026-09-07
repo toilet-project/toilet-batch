@@ -13,7 +13,7 @@ jobs:
   verify:
     if: github.repository == 'toilet-project/toilet-batch' && github.ref == 'refs/heads/feature/tunnel-deploy-readonly-verification'
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     steps:
       - name: Download and verify pinned official connector
         shell: bash
@@ -84,6 +84,17 @@ jobs:
           set -e
           test "$code" -eq 23
           echo 'PASS: remote exit status propagated exactly (23).'
+          # Five-minute idle connection: only a bounded sleep and a fixed marker remotely.
+          started=$SECONDS
+          if ! idle_output=$(timeout 330s ssh "${ssh_args[@]}" \
+            '/usr/bin/sleep 300; /usr/bin/printf "TUNNEL_IDLE_300_OK\n"' \
+            2>"$RUNNER_TEMP/tunnel-probe-error"); then
+            echo 'FAIL: five-minute idle SSH probe failed; no automatic retry.'
+            exit 1
+          fi
+          test "$idle_output" = TUNNEL_IDLE_300_OK
+          test "$((SECONDS - started))" -ge 295
+          echo 'PASS: five-minute idle SSH connection completed.'
           echo 'No deployment, restart, or business-data mutation was performed.'
       - name: Remove ephemeral runner credentials
         if: always()
