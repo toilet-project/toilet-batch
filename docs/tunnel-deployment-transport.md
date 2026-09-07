@@ -15,7 +15,7 @@ SSH is bounded to 10 minutes and is not retried automatically. A timeout or brok
 
 ## Before production merge
 - [x] Each repository passed a short, live, read-only token/SSH/host-pin check.
-- [ ] Record the separate five-minute idle connection result.
+- [x] [Five-minute idle connection passed](https://github.com/toilet-project/toilet-batch/actions/runs/34113703446); remote read-only checks and runner cleanup also succeeded.
 - [ ] Approve and verify deployment SSH boot persistence; it is currently not boot-enabled.
 - [ ] Finish the agreed token expiry alert implementation and validation.
 - [ ] Review the current base and real deployment diff again.
