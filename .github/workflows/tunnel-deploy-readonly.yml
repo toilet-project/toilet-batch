@@ -13,7 +13,7 @@ jobs:
   verify:
     if: github.repository == 'toilet-project/toilet-batch' && github.ref == 'refs/heads/feature/tunnel-deploy-readonly-verification'
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - name: Download and verify pinned official connector
         shell: bash
@@ -84,17 +84,26 @@ jobs:
           set -e
           test "$code" -eq 23
           echo 'PASS: remote exit status propagated exactly (23).'
-          # Five-minute idle connection: only a bounded sleep and a fixed marker remotely.
+          # Only this bounded read-only connection is timed out, never the shared Tunnel.
+          # A marker after 570s proves a long-lived connection; the remote command ends by 620s.
           started=$SECONDS
-          if ! idle_output=$(timeout 330s ssh "${ssh_args[@]}" \
-            '/usr/bin/sleep 300; /usr/bin/printf "TUNNEL_IDLE_300_OK\n"' \
-            2>"$RUNNER_TEMP/tunnel-probe-error"); then
-            echo 'FAIL: five-minute idle SSH probe failed; no automatic retry.'
-            exit 1
-          fi
-          test "$idle_output" = TUNNEL_IDLE_300_OK
-          test "$((SECONDS - started))" -ge 295
-          echo 'PASS: five-minute idle SSH connection completed.'
+          set +e
+          long_output=$(timeout 600s ssh "${ssh_args[@]}" \
+            '/usr/bin/sleep 570; /usr/bin/printf "TUNNEL_LONG_570_OK\n"; /usr/bin/sleep 50' \
+            2>"$RUNNER_TEMP/tunnel-probe-error")
+          code=$?
+          set -e
+          elapsed=$((SECONDS - started))
+          test "$code" -eq 124
+          test "$long_output" = TUNNEL_LONG_570_OK
+          test "$elapsed" -ge 590
+          test "$elapsed" -le 650
+          echo 'PASS: long-lived read-only session reached the 600-second client timeout.'
+          # A separate read-only connection verifies access still works; no deployment is retried.
+          reconnect_output=$(timeout 60s ssh "${ssh_args[@]}" \
+            '/usr/bin/printf "TUNNEL_RECONNECT_OK\n"' 2>"$RUNNER_TEMP/tunnel-probe-error")
+          test "$reconnect_output" = TUNNEL_RECONNECT_OK
+          echo 'PASS: new read-only connection succeeded after the bounded timeout.'
           echo 'No deployment, restart, or business-data mutation was performed.'
       - name: Remove ephemeral runner credentials
         if: always()
