@@ -1,0 +1,43 @@
+name: Isolated US R2 Java verification
+on:
+  push:
+    branches: [verification/r2-us-20260908]
+    paths:
+      - '.github/workflows/us-r2-java-check.yml'
+      - 'src/test/java/com/geupddong/account/UsR2JavaLiveTest.java'
+permissions:
+  contents: read
+concurrency:
+  group: isolated-us-r2-java-check
+  cancel-in-progress: false
+jobs:
+  java-synthetic-only:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Compile and run isolated unit guards without credentials
+        run: |
+          chmod +x gradlew
+          ./gradlew test --tests '*UsR2JavaLiveTest' --tests '*CheckpointedErasureLedgerTest' --tests '*ErasureCatalogueTest' --tests '*ErasureCompletionTest' --tests '*GitHubErasureCheckpointStoreTest' --no-daemon --console=plain
+      - name: Actual Java factory with US synthetic credentials only
+        env:
+          US_JAVA_SYNTHETIC_CHECK: approved
+          TEST_ENDPOINT_HOST: ${{ vars.ERASURE_LEDGER_US_TEST_ENDPOINT_HOST }}
+          TEST_BUCKET: ${{ vars.ERASURE_LEDGER_US_TEST_BUCKET }}
+          TEST_ACCESS_KEY_ID: ${{ secrets.ERASURE_LEDGER_US_TEST_ACCESS_KEY_ID }}
+          TEST_SECRET_ACCESS_KEY: ${{ secrets.ERASURE_LEDGER_US_TEST_SECRET_ACCESS_KEY }}
+        run: |
+          ./gradlew test --tests '*UsR2JavaLiveTest' --rerun-tasks --no-daemon --console=plain
+      - name: Sanitized result
+        if: always()
+        run: |
+          if [ -f build/test-results/test/TEST-com.geupddong.account.UsR2JavaLiveTest.xml ]; then
+            sed -n '/US_JAVA_RESULT /p; /US_JAVA_BOUNDARY /p; /US_JAVA_FAILED /p; /US_JAVA_CLEANUP_FAILED /p' build/test-results/test/TEST-com.geupddong.account.UsR2JavaLiveTest.xml >> "$GITHUB_STEP_SUMMARY"
+          fi
