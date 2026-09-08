@@ -62,9 +62,11 @@ public class AccountErasureJob {
                         catch (RuntimeException unavailable) {
                             log.error("Account erasure checkpoint unavailable");
                         }
-                        // Stop a systemic R2 outage/configuration error from holding the daily chain for hours.
+                        // Both the R2 ledger and its independent checkpoint are shared prerequisites.
+                        // Stop this run on their failure; the next daily invocation may retry.
                         if ("ERASURE_LEDGER_UNAVAILABLE".equals(failure.getMessage())
-                                || "ERASURE_LEDGER_NOT_CONFIGURED".equals(failure.getMessage())) {
+                                || "ERASURE_LEDGER_NOT_CONFIGURED".equals(failure.getMessage())
+                                || "ERASURE_CHECKPOINT_UNAVAILABLE".equals(failure.getMessage())) {
                             infrastructureFailure = true;
                             break scan;
                         }

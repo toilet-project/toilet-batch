@@ -48,6 +48,18 @@ export function prepare(e, role) {
     fail('LIFECYCLE_INVALID_CHECKPOINT_TOKEN')
   if (config.ERASURE_CHECKPOINT_DATABASE_EPOCH && !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(config.ERASURE_CHECKPOINT_DATABASE_EPOCH))
     fail('LIFECYCLE_INVALID_CHECKPOINT_EPOCH')
+  const profile = e.ERASURE_LEDGER_DEPLOYMENT_PROFILE || 'legacy-paused'
+  if (!['legacy-paused','us-runtime'].includes(profile)) fail('LIFECYCLE_INVALID_DEPLOYMENT_PROFILE')
+  if (profile === 'us-runtime') {
+    if (e.ERASURE_LEDGER_US_DEPLOYMENT_APPROVED !== 'true') fail('LIFECYCLE_US_DEPLOYMENT_APPROVAL_REQUIRED')
+    if (!/^https:\/\/[a-f0-9]{32}\.us\.r2\.cloudflarestorage\.com\/?$/.test(config.ERASURE_LEDGER_ENDPOINT) ||
+        config.ERASURE_LEDGER_BUCKET !== 'geupddong-account-erasure-ledger-us' ||
+        config.ERASURE_LEDGER_REALM !== 'production') fail('LIFECYCLE_US_DESTINATION_REQUIRED')
+    if (!/^[a-f0-9]{32}$/.test(config.ERASURE_LEDGER_ACCESS_KEY_ID) ||
+        !/^[a-f0-9]{64}$/.test(config.ERASURE_LEDGER_SECRET_ACCESS_KEY) ||
+        !keys || !config.ERASURE_CHECKPOINT_GITHUB_TOKEN || !config.ERASURE_CHECKPOINT_DATABASE_EPOCH ||
+        !config.REDIS_PASSWORD) fail('LIFECYCLE_US_DEPENDENCIES_REQUIRED')
+  }
   if (role === 'api' && !config.REDIS_PASSWORD) fail('LIFECYCLE_API_REDIS_REQUIRED')
   // Single-quoted Compose dotenv prevents interpolation; transport is base64, never shell-interpreted JSON.
   const dotenv = Object.entries(config).map(([k,v]) => k + "='" + safe(v) + "'").join('\n') + '\n'
