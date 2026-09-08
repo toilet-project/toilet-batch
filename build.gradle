@@ -76,3 +76,28 @@ tasks.register('installErasureTools', Sync) {
     from(configurations.runtimeClasspath.filter { !it.name.startsWith('spring-boot-devtools-') })
     into(layout.buildDirectory.dir('erasure-tools/lib'))
 }
+
+// Build-only test bundle. It never reads credentials or contacts the provider during packaging.
+// The standalone entry point refuses non-approved/non-test targets at runtime.
+tasks.register('packageNcloudKrVerification', Sync) {
+    dependsOn tasks.named('testClasses')
+    from(sourceSets.main.output.classesDirs) { into 'classes' }
+    from(sourceSets.test.output.classesDirs) {
+        include 'com/geupddong/account/NcloudKrJavaLiveTest*.class'
+        into 'classes'
+    }
+    from(sourceSets.test.runtimeClasspath.filter { it.isFile() }) { into 'lib' }
+    into(layout.buildDirectory.dir('ncloud-kr-verification'))
+}
+
+// Offline packaging only. The entry point permits only a fresh, marked synthetic directory on Linux.
+tasks.register('packageLocalLedgerVerification', Sync) {
+    dependsOn tasks.named('testClasses')
+    from(sourceSets.main.output.classesDirs) { into 'classes' }
+    from(sourceSets.test.output.classesDirs) {
+        include 'com/geupddong/account/LocalLedgerLinuxVerification*.class'
+        into 'classes'
+    }
+    from(sourceSets.test.runtimeClasspath.filter { it.isFile() }) { into 'lib' }
+    into(layout.buildDirectory.dir('local-ledger-verification'))
+}

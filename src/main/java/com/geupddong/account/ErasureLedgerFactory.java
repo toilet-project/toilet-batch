@@ -2,7 +2,6 @@ package com.geupddong.account;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import java.net.URI;
 import java.time.Duration;
 import java.util.Map;
 import org.springframework.core.env.Environment;
@@ -20,22 +19,32 @@ public final class ErasureLedgerFactory {
             return record -> { throw new IllegalStateException("ERASURE_LEDGER_NOT_CONFIGURED"); };
         return configured(env);
     }
-    public static R2ErasureLedger configured(Environment env) {
+    public static ObjectErasureLedger configured(Environment env) {
         try {
             String realm = env.getRequiredProperty("erasure.ledger.realm");
+            if (!realm.matches("[a-z0-9-]{3,40}")) throw new IllegalArgumentException();
+            if ("LOCAL".equals(env.getProperty("erasure.ledger.provider", "R2"))) {
+                if (!env.getProperty("erasure.ledger.local-acceptance-verified", Boolean.class, false)
+                        || !env.getProperty("erasure.ledger.catalogue-enabled", Boolean.class, false))
+                    throw new IllegalArgumentException();
+                Map<String,String> localKeys = new ObjectMapper().readValue(
+                        env.getRequiredProperty("erasure.ledger.keys-json"), new TypeReference<>() { });
+                var localCipher = new ErasureCipher(env.getRequiredProperty("erasure.ledger.active-key-id"), localKeys);
+                return new ObjectErasureLedger(new FileErasureObjectStore(
+                        java.nio.file.Path.of(env.getRequiredProperty("erasure.ledger.local-directory")), realm,
+                        env.getRequiredProperty("erasure.ledger.local-store-id")), localCipher, realm, true);
+            }
             String bucket = env.getRequiredProperty("erasure.ledger.bucket");
-            URI endpoint = URI.create(env.getRequiredProperty("erasure.ledger.endpoint"));
-            if (!realm.matches("[a-z0-9-]{3,40}") || !bucket.matches("[a-z0-9][a-z0-9-]{1,61}[a-z0-9]")
-                    || !"https".equals(endpoint.getScheme()) || endpoint.getHost() == null
-                    || !endpoint.getHost().matches("[a-f0-9]{32}(\\.(eu|us))?\\.r2\\.cloudflarestorage\\.com")
-                    || endpoint.getUserInfo() != null || endpoint.getPort() != -1
-                    || endpoint.getQuery() != null || endpoint.getFragment() != null
-                    || !(endpoint.getPath().isEmpty() || endpoint.getPath().equals("/")))
+            var storage = ErasureStorageEndpoint.resolve(
+                    env.getProperty("erasure.ledger.provider", "R2"),
+                    env.getRequiredProperty("erasure.ledger.endpoint"),
+                    env.getProperty("erasure.ledger.domestic-acceptance-verified", Boolean.class, false));
+            if (!realm.matches("[a-z0-9-]{3,40}") || !bucket.matches("[a-z0-9][a-z0-9-]{1,61}[a-z0-9]"))
                 throw new IllegalArgumentException();
             Map<String,String> keys = new ObjectMapper().readValue(
                     env.getRequiredProperty("erasure.ledger.keys-json"), new TypeReference<>() { });
             var cipher = new ErasureCipher(env.getRequiredProperty("erasure.ledger.active-key-id"), keys);
-            var client = S3Client.builder().endpointOverride(endpoint).region(Region.of("auto"))
+            var client = S3Client.builder().endpointOverride(storage.endpoint()).region(Region.of(storage.signingRegion()))
                     .credentialsProvider(StaticCredentialsProvider.create(AwsBasicCredentials.create(
                             env.getRequiredProperty("erasure.ledger.access-key-id"),
                             env.getRequiredProperty("erasure.ledger.secret-access-key"))))

@@ -86,6 +86,11 @@ management:
 erasure:
   ledger:
     enabled: ${ERASURE_LEDGER_ENABLED:false}
+    provider: ${ERASURE_LEDGER_PROVIDER:R2}
+    local-acceptance-verified: ${ERASURE_LEDGER_LOCAL_ACCEPTANCE_VERIFIED:false}
+    local-directory: ${ERASURE_LEDGER_LOCAL_DIRECTORY:}
+    local-store-id: ${ERASURE_LEDGER_LOCAL_STORE_ID:}
+    domestic-acceptance-verified: ${ERASURE_LEDGER_DOMESTIC_ACCEPTANCE_VERIFIED:false}
     catalogue-enabled: ${ERASURE_LEDGER_CATALOGUE_ENABLED:false}
     realm: ${ERASURE_LEDGER_REALM:production}
     bucket: ${ERASURE_LEDGER_BUCKET:geupddong-account-erasure-ledger}

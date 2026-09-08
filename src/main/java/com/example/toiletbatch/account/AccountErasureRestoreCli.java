@@ -56,7 +56,12 @@ public final class AccountErasureRestoreCli {
             try (var ledger = ErasureLedgerFactory.configured(env)) {
                 int expected = Integer.parseInt(env.getRequiredProperty("ERASURE_RESTORE_EXPECTED_OBJECTS"));
                 stage = "ledger-snapshot";
-                var records = ledger.readAll(expected);
+                var checkpointStore = GitHubErasureCheckpointStore.configured(
+                        env.getRequiredProperty("ERASURE_CHECKPOINT_GITHUB_TOKEN"));
+                var records = VerifiedErasureSnapshot.read(ledger, checkpointStore,
+                        env.getRequiredProperty("erasure.ledger.realm"),
+                        env.getRequiredProperty("ERASURE_CHECKPOINT_DATABASE_EPOCH"), java.time.Clock.systemUTC());
+                if (records.size() != expected) throw new IllegalStateException();
                 stage = "database-replay";
                 var result = new AccountErasureRestore(jdbc, new DataSourceTransactionManager(ds)).replay(
                         records, env.getRequiredProperty("erasure.ledger.realm"), LocalDateTime.now(ZoneId.of("Asia/Seoul")), apply);

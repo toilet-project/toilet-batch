@@ -14,9 +14,23 @@ tool_dir="${GEUPDDONG_ERASURE_TOOL_DIR:?compiled erasure tool directory required
 [[ "${ERASURE_RESTORE_WRITERS_STOPPED:-}" == true ]] || fail 'freeze ledger writers first'
 [[ "${ERASURE_RESTORE_INVENTORY_CONFIRMED:-}" == true ]] || fail 'independent ledger inventory required'
 [[ "${ERASURE_RESTORE_EXPECTED_OBJECTS:-}" =~ ^[0-9]{1,7}$ ]] || fail 'expected object count required'
-for variable in ERASURE_LEDGER_REALM ERASURE_LEDGER_BUCKET ERASURE_LEDGER_ENDPOINT ERASURE_LEDGER_ACCESS_KEY_ID ERASURE_LEDGER_SECRET_ACCESS_KEY ERASURE_LEDGER_ACTIVE_KEY_ID ERASURE_LEDGER_KEYS_JSON; do
+for variable in ERASURE_LEDGER_REALM ERASURE_LEDGER_ACTIVE_KEY_ID ERASURE_LEDGER_KEYS_JSON ERASURE_CHECKPOINT_GITHUB_TOKEN ERASURE_CHECKPOINT_DATABASE_EPOCH; do
   [[ -n "${!variable:-}" ]] || fail 'missing ledger setting'
 done
+case "${ERASURE_LEDGER_PROVIDER:-R2}" in
+  LOCAL)
+    [[ "${ERASURE_LEDGER_LOCAL_ACCEPTANCE_VERIFIED:-}" == true && "${ERASURE_LEDGER_CATALOGUE_ENABLED:-}" == true ]] || fail 'local storage acceptance required'
+    for variable in ERASURE_LEDGER_LOCAL_DIRECTORY ERASURE_LEDGER_LOCAL_STORE_ID; do
+      [[ -n "${!variable:-}" ]] || fail 'missing local ledger setting'
+    done
+    ;;
+  R2|NCLOUD_KR)
+    for variable in ERASURE_LEDGER_BUCKET ERASURE_LEDGER_ENDPOINT ERASURE_LEDGER_ACCESS_KEY_ID ERASURE_LEDGER_SECRET_ACCESS_KEY; do
+      [[ -n "${!variable:-}" ]] || fail 'missing object storage setting'
+    done
+    ;;
+  *) fail 'unknown ledger provider' ;;
+esac
 expected_hash="$(awk 'NR==1 {print $1}' "$backup_file.sha256")"
 actual_hash="$(sha256sum "$backup_file" | cut -d ' ' -f 1)"
 [[ "$expected_hash" =~ ^[a-fA-F0-9]{64}$ && "${expected_hash,,}" == "$actual_hash" ]] || fail 'backup checksum mismatch'
