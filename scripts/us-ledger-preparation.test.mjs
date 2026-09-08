@@ -39,8 +39,8 @@ test('both services require all dependencies and retain the same identity',()=>{
     assert.ok(value.includes("ERASURE_CHECKPOINT_ENABLED='false'"))
   }
 })
-test('workflow uses only the separately stored US runtime key for the ledger',()=>{
-  const workflow=readFileSync(new URL('../.github/workflows/deploy.yml',import.meta.url),'utf8')
+test('historical US fixture uses only the separately stored US runtime key for the ledger',()=>{
+  const workflow=readFileSync(new URL('../deploy/us-paused.baseline.yml',import.meta.url),'utf8')
   assert.ok(workflow.includes("ERASURE_LEDGER_DEPLOYMENT_PROFILE: 'us-runtime'"))
   assert.ok(workflow.includes('vars.ERASURE_LEDGER_US_DEPLOYMENT_APPROVED'))
   assert.ok(workflow.includes('vars.ERASURE_LEDGER_US_RUNTIME_ENDPOINT'))

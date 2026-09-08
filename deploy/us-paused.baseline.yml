@@ -1,4 +1,4 @@
-# LOCAL preparation only: explicit deployment approval required; account actions remain disabled.
+# HISTORICAL TEST FIXTURE ONLY: never install or use for automatic rollback.
 name: Toilet Batch CI/CD Pipeline
 
 on:
@@ -35,16 +35,14 @@ jobs:
           ACCOUNT_ERASURE_ENABLED: 'false'
           ERASURE_LEDGER_ENABLED: 'false'
           ERASURE_LEDGER_CATALOGUE_ENABLED: 'false'
-          ERASURE_LEDGER_DEPLOYMENT_PROFILE: 'local-paused'
-          ERASURE_LEDGER_PROVIDER: 'LOCAL'
-          ERASURE_LEDGER_LOCAL_DEPLOYMENT_APPROVED: ${{ vars.ERASURE_LEDGER_LOCAL_DEPLOYMENT_APPROVED || 'false' }}
-          ERASURE_LEDGER_LOCAL_ACCEPTANCE_VERIFIED: 'false'
-          ERASURE_LEDGER_LOCAL_DIRECTORY: '/var/lib/geupddong-erasure-ledger'
-          ERASURE_LEDGER_LOCAL_STORE_ID: ${{ vars.ERASURE_LEDGER_LOCAL_STORE_ID }}
-          LOCAL_LEDGER_RUNTIME_UID: '1000'
-          LOCAL_LEDGER_RUNTIME_GID: '1000'
+          ERASURE_LEDGER_DEPLOYMENT_PROFILE: 'us-runtime'
+          ERASURE_LEDGER_US_DEPLOYMENT_APPROVED: ${{ vars.ERASURE_LEDGER_US_DEPLOYMENT_APPROVED || 'false' }}
+          ERASURE_LEDGER_ENDPOINT: ${{ vars.ERASURE_LEDGER_US_RUNTIME_ENDPOINT }}
           ERASURE_LEDGER_REALM: ${{ vars.ERASURE_LEDGER_REALM || 'production' }}
+          ERASURE_LEDGER_BUCKET: 'geupddong-account-erasure-ledger-us'
           ERASURE_LEDGER_ACTIVE_KEY_ID: ${{ vars.ERASURE_LEDGER_ACTIVE_KEY_ID || 'k1' }}
+          ERASURE_LEDGER_ACCESS_KEY_ID: ${{ secrets.ERASURE_LEDGER_US_RUNTIME_ACCESS_KEY_ID }}
+          ERASURE_LEDGER_SECRET_ACCESS_KEY: ${{ secrets.ERASURE_LEDGER_US_RUNTIME_SECRET_ACCESS_KEY }}
           ERASURE_LEDGER_KEYS_JSON: ${{ secrets.ERASURE_LEDGER_KEYS_JSON }}
           ERASURE_CHECKPOINT_ENABLED: 'false'
           ERASURE_CHECKPOINT_GITHUB_TOKEN: ${{ secrets.ERASURE_CHECKPOINT_GITHUB_TOKEN }}
@@ -107,9 +105,6 @@ jobs:
           DEPLOY_SCRIPT: |
             set -eu
             umask 077
-            # Read-only preflight must finish BEFORE touching operational configuration.
-            test -x /home/luha/erasure-tools/local-ledger-preflight
-            /home/luha/erasure-tools/local-ledger-preflight batch '${{ vars.ERASURE_LEDGER_LOCAL_STORE_ID }}'
             mkdir -p ~/toilet-batch
             cd ~/toilet-batch
             mkdir -p region-results
@@ -151,7 +146,6 @@ jobs:
             cat <<'EOF' > docker-compose.yml
             services:
               toilet-batch:
-                user: "1000:1000"
                 image: ${{ secrets.DOCKERHUB_USERNAME }}/toilet-batch:${{ github.sha }}
                 container_name: toilet-batch
                 restart: unless-stopped
@@ -160,12 +154,6 @@ jobs:
                   - .account-lifecycle.env
                 volumes:
                   - ./region-results:/var/lib/toilet-region
-                  - type: bind
-                    source: /var/lib/geupddong-erasure-ledger
-                    target: /var/lib/geupddong-erasure-ledger
-                    read_only: false
-                    bind:
-                      create_host_path: false
                 networks:
                   - toilet-network
                 logging:

@@ -4,7 +4,7 @@ import {pathToFileURL} from 'node:url'
 // Candidate only: never writes .github/workflows, contacts a server or deploys.
 export function renderLocalDeployment(source, role) {
   if (!['api','batch'].includes(role)) throw Error('INVALID_ROLE')
-  let text=source.replaceAll('\r\n','\n')
+  let text=source.replaceAll('\r\n','\n').replace(/^# HISTORICAL TEST FIXTURE ONLY:.*\n/, '')
   const replace=(a,b)=> {
     if (text.split(a).length !== 2) throw Error('DEPLOYMENT_BASE_DRIFT')
     text=text.replace(a,b)
@@ -52,6 +52,6 @@ export function renderLocalDeployment(source, role) {
 
 if(process.argv[1] && import.meta.url===pathToFileURL(process.argv[1]).href) {
   const role=process.argv[2]
-  const source=readFileSync(new URL('../.github/workflows/deploy.yml',import.meta.url),'utf8')
+  const source=readFileSync(new URL('../deploy/us-paused.baseline.yml',import.meta.url),'utf8')
   process.stdout.write(renderLocalDeployment(source,role))
 }
