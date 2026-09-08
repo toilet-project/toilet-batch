@@ -42,6 +42,32 @@ class UsR2JavaLiveTest {
     static String required(String key) {
         String value=System.getenv(key); check(value!=null&&!value.isBlank()); return value;
     }
+    @Test
+    @EnabledIfEnvironmentVariable(named="US_RUNTIME_READONLY_CHECK",matches="approved")
+    void runtimeKeyCanReadBucketWithoutWrites() {
+        String stage="configuration";
+        try {
+            String host=required("TEST_ENDPOINT_HOST"), bucket=required("TEST_BUCKET");
+            target(host,bucket,"verify-us-java-"+"0".repeat(20));
+            try(var s3=S3Client.builder().endpointOverride(URI.create("https://"+host)).region(Region.of("auto"))
+                    .credentialsProvider(StaticCredentialsProvider.create(AwsBasicCredentials.create(required("RUNTIME_ACCESS_KEY_ID"),required("RUNTIME_SECRET_ACCESS_KEY"))))
+                    .httpClientBuilder(UrlConnectionHttpClient.builder().connectionTimeout(Duration.ofSeconds(3)).socketTimeout(Duration.ofSeconds(5)))
+                    .overrideConfiguration(c->c.apiCallTimeout(Duration.ofSeconds(15)).apiCallAttemptTimeout(Duration.ofSeconds(5)))
+                    .serviceConfiguration(S3Configuration.builder().pathStyleAccessEnabled(true).build()).build()) {
+                stage="head-bucket"; s3.headBucket(r->r.bucket(bucket));
+                int observed=0; stage="list-production-presence-only";
+                for(String prefix:List.of("v1/production/","catalogue-v1/production/","completion-v1/production/")) {
+                    var result=s3.listObjectsV2(r->r.bucket(bucket).prefix(prefix).maxKeys(1));
+                    check(!(result.contents().isEmpty()&&Boolean.TRUE.equals(result.isTruncated())));
+                    if(!result.contents().isEmpty()) observed++;
+                }
+                System.out.println("US_RUNTIME_READONLY_PASS bucketAccess=true productionPrefixesWithObjects="+observed+" writes=false objectContentsRead=false");
+            }
+        } catch(Throwable ignored) {
+            System.out.println("US_RUNTIME_READONLY_FAILED stage="+stage);
+            throw new AssertionError("RUNTIME_READONLY_FAILED detailsSuppressed=true");
+        }
+    }
     static byte[] read(S3Client s3,String bucket,String key) {
         return s3.getObjectAsBytes(r->r.bucket(bucket).key(key)).asByteArray();
     }

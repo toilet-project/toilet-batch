@@ -26,18 +26,18 @@ jobs:
         run: |
           chmod +x gradlew
           ./gradlew test --tests '*UsR2JavaLiveTest' --tests '*CheckpointedErasureLedgerTest' --tests '*ErasureCatalogueTest' --tests '*ErasureCompletionTest' --tests '*GitHubErasureCheckpointStoreTest' --no-daemon --console=plain
-      - name: Actual Java factory with US synthetic credentials only
+      - name: New runtime key read-only bucket access
         env:
-          US_JAVA_SYNTHETIC_CHECK: approved
+          US_RUNTIME_READONLY_CHECK: approved
           TEST_ENDPOINT_HOST: ${{ vars.ERASURE_LEDGER_US_TEST_ENDPOINT_HOST }}
           TEST_BUCKET: ${{ vars.ERASURE_LEDGER_US_TEST_BUCKET }}
-          TEST_ACCESS_KEY_ID: ${{ secrets.ERASURE_LEDGER_US_TEST_ACCESS_KEY_ID }}
-          TEST_SECRET_ACCESS_KEY: ${{ secrets.ERASURE_LEDGER_US_TEST_SECRET_ACCESS_KEY }}
+          RUNTIME_ACCESS_KEY_ID: ${{ secrets.ERASURE_LEDGER_US_RUNTIME_ACCESS_KEY_ID }}
+          RUNTIME_SECRET_ACCESS_KEY: ${{ secrets.ERASURE_LEDGER_US_RUNTIME_SECRET_ACCESS_KEY }}
         run: |
           ./gradlew test --tests '*UsR2JavaLiveTest' --rerun-tasks --no-daemon --console=plain
       - name: Sanitized result
         if: always()
         run: |
           if [ -f build/test-results/test/TEST-com.geupddong.account.UsR2JavaLiveTest.xml ]; then
-            sed -n '/US_JAVA_RESULT /p; /US_JAVA_BOUNDARY /p; /US_JAVA_FAILED /p; /US_JAVA_CLEANUP_FAILED /p' build/test-results/test/TEST-com.geupddong.account.UsR2JavaLiveTest.xml >> "$GITHUB_STEP_SUMMARY"
+            sed -n '/US_RUNTIME_READONLY_PASS /p; /US_RUNTIME_READONLY_FAILED /p' build/test-results/test/TEST-com.geupddong.account.UsR2JavaLiveTest.xml | tee -a "$GITHUB_STEP_SUMMARY"
           fi
