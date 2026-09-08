@@ -18,6 +18,17 @@ const {steps:newSteps,...newJob}=newJobs[key];
 assert.deepEqual(oldJob,newJob);
 const i=oldSteps.findIndex(s=>s.uses?.startsWith('appleboy/ssh-action@'));
 assert.equal(i,oldSteps.length-1);
+// Permit only the reviewed US ledger preparation delta; all other build and transport fields stay pinned.
+const lifecycleBaseline = oldSteps.find(s => s.id === 'lifecycle');
+assert.ok(lifecycleBaseline, 'Pinned lifecycle preparation step required');
+Object.assign(lifecycleBaseline.env, {
+ ERASURE_LEDGER_DEPLOYMENT_PROFILE: 'us-runtime',
+ ERASURE_LEDGER_US_DEPLOYMENT_APPROVED: "${{ vars.ERASURE_LEDGER_US_DEPLOYMENT_APPROVED || 'false' }}",
+ ERASURE_LEDGER_ENDPOINT: '${{ vars.ERASURE_LEDGER_US_RUNTIME_ENDPOINT }}',
+ ERASURE_LEDGER_BUCKET: 'geupddong-account-erasure-ledger-us',
+ ERASURE_LEDGER_ACCESS_KEY_ID: '${{ secrets.ERASURE_LEDGER_US_RUNTIME_ACCESS_KEY_ID }}',
+ ERASURE_LEDGER_SECRET_ACCESS_KEY: '${{ secrets.ERASURE_LEDGER_US_RUNTIME_SECRET_ACCESS_KEY }}',
+});
 assert.deepEqual(oldSteps.slice(0,i),newSteps.slice(0,i),'Build steps must not change');
 assert.equal(newSteps.length,oldSteps.length+2);
 const [prepare,deploy,cleanup]=newSteps.slice(i);
@@ -39,5 +50,5 @@ for(const script of [...newSteps.filter(s=>s.run).map(s=>s.run),deploy.env.DEPLO
  const check=spawnSync(process.env.TUNNEL_BASH || 'bash',['-n'],{input:script,encoding:'utf8',timeout:10000});
  assert.equal(check.status,0,check.stderr || String(check.error));
 }
-console.log('PASS: baseline '+baselineCommit+'; trigger/job/build/remote commands unchanged; pinned transport and shell syntax verified.');
+console.log('PASS: baseline '+baselineCommit+' plus explicit US ledger configuration delta; remaining build/remote/transport invariants and shell syntax verified.');
 console.log('No credentials, SSH, image push, or deployment executed.');
