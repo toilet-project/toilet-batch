@@ -5,6 +5,8 @@ import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.time.LocalDateTime;
 import java.util.List;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
@@ -55,7 +57,7 @@ class AccountErasureJobTest {
         verify(notifier, times(2)).notifyAccountErasureFailure(0, 0, true);
     }
 
-    @Test void checkpointFailureDoesNotBlockNextAccount() {
+    @Test void failureRecordingDoesNotBlockNextAccount() {
         when(worker.findDue(any(), eq(0L), eq(2))).thenReturn(List.of(1L, 2L));
         when(worker.eraseIfDue(eq(1L), any())).thenThrow(new IllegalStateException());
         doThrow(new IllegalStateException()).when(worker).recordFailure(eq(1L), any());
@@ -63,12 +65,38 @@ class AccountErasureJobTest {
         assertDoesNotThrow(new AccountErasureJob(worker, notifier, metrics, true, 2, false)::runAfterSync);
         verify(worker).eraseIfDue(eq(2L), any());
     }
-    @Test void globalLedgerFailureStopsFurtherExternalRequestsAndAlerts() {
+    @ParameterizedTest
+    @ValueSource(strings = {"ERASURE_LEDGER_UNAVAILABLE", "ERASURE_LEDGER_NOT_CONFIGURED",
+            "ERASURE_CHECKPOINT_UNAVAILABLE"})
+    void globalLedgerFailureStopsFurtherExternalRequestsAndAlerts(String failureCode) {
         when(worker.findDue(any(), eq(0L), eq(2))).thenReturn(List.of(1L, 2L));
-        when(worker.eraseIfDue(eq(1L), any())).thenThrow(new IllegalStateException("ERASURE_LEDGER_UNAVAILABLE"));
+        when(worker.eraseIfDue(eq(1L), any())).thenThrow(new IllegalStateException(failureCode));
         when(worker.countOverdue(any())).thenReturn(2L);
         new AccountErasureJob(worker, notifier, metrics, true, 2, false).runAfterSync();
         verify(worker, never()).eraseIfDue(eq(2L), any());
         verify(notifier).notifyAccountErasureFailure(1, 2, true);
+    }
+
+    @Test void independentCheckpointFailureStopsRunButAllowsNextInvocation() {
+        when(worker.findDue(any(), eq(0L), eq(2))).thenReturn(List.of(1L, 2L));
+        when(worker.eraseIfDue(eq(1L), any()))
+                .thenThrow(new IllegalStateException("ERASURE_CHECKPOINT_UNAVAILABLE"))
+                .thenReturn(true);
+        when(worker.eraseIfDue(eq(2L), any())).thenReturn(true);
+        when(worker.countOverdue(any())).thenReturn(2L, 0L);
+        var job = new AccountErasureJob(worker, notifier, metrics, true, 2, false);
+
+        assertDoesNotThrow(job::runAfterSync);
+        verify(worker, never()).eraseIfDue(eq(2L), any());
+        verify(worker).recordFailure(eq(1L), any());
+        verify(notifier).notifyAccountErasureFailure(1, 2, true);
+        assertEquals(1, metrics.counter("account.erasure.failed").count());
+        assertEquals(0, metrics.counter("account.erasure.completed").count());
+
+        assertDoesNotThrow(job::runAfterSync);
+        verify(worker, times(2)).findDue(any(), eq(0L), eq(2));
+        verify(worker).eraseIfDue(eq(2L), any());
+        assertEquals(2, metrics.counter("account.erasure.completed").count());
+        verifyNoMoreInteractions(notifier);
     }
 }
