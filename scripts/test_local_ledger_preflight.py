@@ -158,6 +158,23 @@ class PreflightTests(unittest.TestCase):
                 self.assertNotIn('REDIS_PASSWORD',child)
                 self.assertNotIn(values['ERASURE_LEDGER_KEYS_JSON'],run.call_args_list[0].args[0])
 
+    def test_mount_enumeration_order_is_ignored_but_actual_changes_are_not(self):
+        item=self.inspect_item()
+        item['Mounts'].append({'Destination':'/var/lib/toilet-region','Source':'/synthetic/region','Type':'bind','RW':True})
+        def fingerprint():
+            with patch.object(module.subprocess,'run',return_value=Mock(returncode=0,stdout=json.dumps([item]))):
+                return module.config('toilet-batch')[1]
+        original=fingerprint()
+        item['Mounts'].reverse()
+        self.assertEqual(original,fingerprint())
+        region=item['Mounts'][0]
+        for key,value in [('Source','/changed'),('RW',False),('Destination','/other'),('Type','volume')]:
+            prior=region[key]; region[key]=value
+            self.assertNotEqual(original,fingerprint())
+            region[key]=prior
+        item['Mounts'].append(dict(item['Mounts'][1]))
+        with self.assertRaises(ValueError): fingerprint()
+
     def test_both_modes_pass_with_minimal_child_environment(self):
         for mode in ('R2','LOCAL'): self.run_main(mode)
 

@@ -39,6 +39,9 @@ def config(name):
         mounts=[m for m in item['Mounts'] if m['Destination']==ROOT]
         require(len(mounts)==1 and mounts[0]['Type']=='bind' and mounts[0]['Source']==ROOT and mounts[0]['RW'] is True)
     stable={k:item[k] for k in ('Id','Image','Config','RestartCount','Mounts','HostConfig')}
+    # Docker may enumerate the same mounts in a different order on each inspect.
+    # Canonicalize only enumeration order; retain every mount field and duplicate.
+    stable['Mounts']=sorted(item['Mounts'],key=lambda mount:json.dumps(mount,sort_keys=True))
     stable['started']=item['State']['StartedAt']
     return values,hashlib.sha256(json.dumps(stable,sort_keys=True).encode()).hexdigest()
 
