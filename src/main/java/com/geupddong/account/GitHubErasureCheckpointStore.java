@@ -14,11 +14,14 @@ public final class GitHubErasureCheckpointStore implements CheckpointedErasureLe
     private final ObjectMapper json = new ObjectMapper().enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION);
     public GitHubErasureCheckpointStore(Transport transport) { this.transport=transport; }
     public static GitHubErasureCheckpointStore configured(String token) {
+        return new GitHubErasureCheckpointStore(configuredTransport(token));
+    }
+    static Transport configuredTransport(String token) {
         if (token == null || !token.matches("[A-Za-z0-9_]{20,255}")) throw failure();
         var client=HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(3))
                 .followRedirects(HttpClient.Redirect.NEVER).build();
         var mapper=new ObjectMapper().enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION);
-        return new GitHubErasureCheckpointStore((method,path,body)->{
+        return (method,path,body)->{
             try {
                 if (!path.matches("/[A-Za-z0-9/?.=_-]+")) throw failure();
                 var builder=HttpRequest.newBuilder(URI.create("https://api.github.com/repos/toilet-project/operations-checkpoints"+path))
@@ -36,7 +39,7 @@ public final class GitHubErasureCheckpointStore implements CheckpointedErasureLe
                 }
             } catch (InterruptedException e) { Thread.currentThread().interrupt(); throw failure(); }
             catch (Exception ignored) { throw failure(); }
-        });
+        };
     }
     private JsonNode call(String method,String path,Object body) {
         try { return transport.request(method,path,body); } catch (RuntimeException ignored) { throw failure(); }

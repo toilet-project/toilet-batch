@@ -15,7 +15,9 @@ class RestroomSyncSchedulerTest {
     private final BatchFailureNotifier failureNotifier = mock(BatchFailureNotifier.class);
     private final com.example.toiletbatch.account.AccountErasureJob erasure =
             mock(com.example.toiletbatch.account.AccountErasureJob.class);
-    private final RestroomSyncScheduler scheduler = new RestroomSyncScheduler(executionService, failureNotifier, erasure);
+    private final com.example.toiletbatch.account.AccountErasureCompletionJob completion = mock(com.example.toiletbatch.account.AccountErasureCompletionJob.class);
+    private final com.example.toiletbatch.account.AccountLedgerRetirementJob retirement = mock(com.example.toiletbatch.account.AccountLedgerRetirementJob.class);
+    private final RestroomSyncScheduler scheduler = new RestroomSyncScheduler(executionService, failureNotifier, erasure, completion, retirement);
 
     @Test
     void sendsNotificationAfterRecordedExecutionFails() {
@@ -43,9 +45,11 @@ class RestroomSyncSchedulerTest {
         scheduler.synchronizeDaily();
 
         verify(executionService).synchronizeRecentUpdates(BatchSyncTrigger.SCHEDULED);
-        var order = inOrder(executionService, erasure);
+        var order = inOrder(executionService, erasure, completion, retirement);
         order.verify(executionService).synchronizeRecentUpdates(BatchSyncTrigger.SCHEDULED);
         order.verify(erasure).runAfterSync();
+        order.verify(completion).runAfterErasure();
+        order.verify(retirement).runAfterCompletion();
     }
 
     @Test
@@ -55,5 +59,18 @@ class RestroomSyncSchedulerTest {
         doThrow(new IllegalStateException("notification")).when(failureNotifier).notifyFailure(failure);
         org.junit.jupiter.api.Assertions.assertThrows(IllegalStateException.class, scheduler::synchronizeDaily);
         verify(erasure).runAfterSync();
+        verify(completion).runAfterErasure();
+        verify(retirement).runAfterCompletion();
+    }
+    @Test void erasureInterruptionStillAttemptsCompletionReconciliationAndRetirement() {
+        doThrow(new IllegalStateException("synthetic")).when(erasure).runAfterSync();
+        org.junit.jupiter.api.Assertions.assertThrows(IllegalStateException.class,scheduler::synchronizeDaily);
+        var order=inOrder(erasure,completion,retirement);
+        order.verify(erasure).runAfterSync();order.verify(completion).runAfterErasure();order.verify(retirement).runAfterCompletion();
+    }
+    @Test void completionInterruptionStillAttemptsGuardedRetirement() {
+        doThrow(new IllegalStateException("synthetic")).when(completion).runAfterErasure();
+        org.junit.jupiter.api.Assertions.assertThrows(IllegalStateException.class,scheduler::synchronizeDaily);
+        verify(retirement).runAfterCompletion();
     }
 }

@@ -28,7 +28,7 @@ public final class LocalLedgerEmptyPreflight {
             var local=new FileErasureObjectStore(root,"production",env("LOCAL_STORE_ID"));
             String endpoint=env("SOURCE_ENDPOINT");
             require(endpoint.matches("https://[a-f0-9]{32}\\.us\\.r2\\.cloudflarestorage\\.com"));
-            var checkpoints=GitHubErasureCheckpointStore.configured(env("CHECKPOINT_TOKEN"));
+            var checkpoints=GitHubErasureHistoryStore.configured(env("CHECKPOINT_TOKEN"));
             var head=checkpoints.read(); var cp=head.checkpoint();
             require(cp.realm().equals("production") && cp.databaseEpoch().equals(env("DATABASE_EPOCH")));
             require(cp.count()==0 && cp.inventorySha256().equals(cp.inventoryDigest(Map.of())));

@@ -13,15 +13,21 @@ public class RestroomSyncScheduler {
     private final RestroomSyncExecutionService restroomSyncExecutionService;
     private final BatchFailureNotifier batchFailureNotifier;
     private final com.example.toiletbatch.account.AccountErasureJob accountErasureJob;
+    private final com.example.toiletbatch.account.AccountErasureCompletionJob completionJob;
+    private final com.example.toiletbatch.account.AccountLedgerRetirementJob retirementJob;
 
     public RestroomSyncScheduler(
             RestroomSyncExecutionService restroomSyncExecutionService,
             BatchFailureNotifier batchFailureNotifier,
-            com.example.toiletbatch.account.AccountErasureJob accountErasureJob
+            com.example.toiletbatch.account.AccountErasureJob accountErasureJob,
+            com.example.toiletbatch.account.AccountErasureCompletionJob completionJob,
+            com.example.toiletbatch.account.AccountLedgerRetirementJob retirementJob
     ) {
         this.restroomSyncExecutionService = restroomSyncExecutionService;
         this.batchFailureNotifier = batchFailureNotifier;
         this.accountErasureJob = accountErasureJob;
+        this.completionJob = completionJob;
+        this.retirementJob = retirementJob;
     }
 
     @Scheduled(cron = "${batch.restroom-sync.cron}", zone = "${batch.restroom-sync.zone}")
@@ -39,7 +45,9 @@ public class RestroomSyncScheduler {
         } finally {
             // Only the scheduled daily chain invokes erasure; manual sync/analysis never does.
             // The job records its own failures and does not alter public-data sync history.
-            accountErasureJob.runAfterSync();
+            try {accountErasureJob.runAfterSync();} finally {
+                try {completionJob.runAfterErasure();} finally {retirementJob.runAfterCompletion();}
+            }
         }
     }
 }

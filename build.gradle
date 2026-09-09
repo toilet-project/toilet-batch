@@ -101,3 +101,12 @@ tasks.register('packageLocalLedgerVerification', Sync) {
     from(sourceSets.test.runtimeClasspath.filter { it.isFile() }) { into 'lib' }
     into(layout.buildDirectory.dir('local-ledger-verification'))
 }
+
+// Synthetic-only filesystem/process interruption verification. Does not package credentials.
+tasks.register('packageRetirementVerification', Sync) {
+    dependsOn tasks.named('testClasses')
+    from(sourceSets.main.output.classesDirs) { into 'classes' }
+    from(sourceSets.test.output.classesDirs) { into 'classes' }
+    from(sourceSets.test.runtimeClasspath.filter { it.isFile() }) { into 'lib' }
+    into(layout.buildDirectory.dir('retirement-verification'))
+}

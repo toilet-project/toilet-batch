@@ -40,7 +40,7 @@ public final class LocalLedgerRedeploymentPreflight {
                     throw new IllegalStateException();
             var local = new FileErasureObjectStore(root, "production", env("LOCAL_STORE_ID"));
             ErasureLedgerMigration.verifyReadOnly(local, cipher(env("LEDGER_KEYS_JSON"), env("LEDGER_ACTIVE_KEY_ID")),
-                    GitHubErasureCheckpointStore.configured(env("CHECKPOINT_TOKEN")),
+                    GitHubErasureHistoryStore.configured(env("CHECKPOINT_TOKEN")),
                     "production", env("DATABASE_EPOCH"), Clock.systemUTC());
             System.out.println("LOCAL_REDEPLOYMENT_PREFLIGHT_PASS inventoryVerified=true activationAllowed=false");
         } catch (Exception ignored) {
