@@ -2,8 +2,10 @@ import {test} from 'node:test'
 import assert from 'node:assert/strict'
 import {readFileSync} from 'node:fs'
 import {renderMaintenancePreparation} from './render-maintenance-deployment.mjs'
-const source = readFileSync(new URL('../.github/workflows/deploy.yml', import.meta.url), 'utf8')
-const role = source.includes('container_name: toilet-api') ? 'api' : 'batch'
+import {renderLocalDeployment} from './render-local-deployment.mjs'
+const baseline = readFileSync(new URL('../deploy/us-paused.baseline.yml', import.meta.url), 'utf8')
+const role = 'batch'
+const source = renderLocalDeployment(baseline, role)
 test('candidate keeps actions paused and mounts a pre-existing common lock directory', () => {
   const out = renderMaintenancePreparation(source, role)
   assert.ok(out.includes("ACCOUNT_LIFECYCLE_MAINTENANCE: 'true'"))
