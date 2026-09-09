@@ -97,4 +97,53 @@ class ErasureLedgerMigrationTest {
         ledger.ensureCompletion(ErasureCompletion.observed(record,EPOCH,NOW));
         denied(()->migration().copyApproved(plan.ciphertextInventoryHash(),true)); assertEquals(0,target.writes);
     }
+
+    ErasureLedgerMigration.Summary verifyOnly() {
+        return ErasureLedgerMigration.verifyReadOnly(source,cipher,checkpoints,REALM,EPOCH,Clock.fixed(NOW,ZoneOffset.UTC));
+    }
+    @Test void redeploymentAcceptsEmptyAndPopulatedAuthenticatedHistoryWithoutWrites() {
+        setup(false); assertEquals(0,verifyOnly().intents());
+        setup(true);
+        ledger.ensureCompletion(ErasureCompletion.observed(record,EPOCH,NOW.minusSeconds(100)));
+        ledger.ensureCompletion(ErasureCompletion.observed(record,new UUID(0,9).toString(),NOW.minusSeconds(50)));
+        int writes=source.writes;
+        var result=verifyOnly();
+        assertEquals(1,result.intents()); assertEquals(1,result.catalogues()); assertEquals(2,result.completions());
+        assertFalse(result.applied()); assertEquals(writes,source.writes); assertEquals(0,target.writes);
+    }
+    @Test void redeploymentRejectsMissingHistoryCorruptionAndHeadDrift() {
+        setup(true); source.data.clear(); denied(this::verifyOnly);
+        setup(true); source.data.values().iterator().next()[35]^=1; denied(this::verifyOnly);
+        source.data.clear(); setup(true); changeAt=reads+2; denied(this::verifyOnly);
+    }
+    @Test void redeploymentRejectsOrphanCompletionEvenWhenIndependentIntentCountIsZero() throws Exception {
+        setup(false);
+        var receipt=ErasureCompletion.observed(record,EPOCH,NOW);
+        source.data.put(receipt.objectKey(),cipher.encryptDocument(REALM,receipt.objectKey(),new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsBytes(receipt)));
+        denied(this::verifyOnly);
+    }
+    @Test void redeploymentRejectsWrongKeyEpochAndMissingCheckpoint() {
+        setup(true);
+        var wrong=new ErasureCipher("other",Map.of("other",Base64.getEncoder().encodeToString(new byte[32])));
+        denied(()->ErasureLedgerMigration.verifyReadOnly(source,wrong,checkpoints,REALM,EPOCH,Clock.fixed(NOW,ZoneOffset.UTC)));
+        denied(()->ErasureLedgerMigration.verifyReadOnly(source,cipher,checkpoints,REALM,new UUID(0,8).toString(),Clock.fixed(NOW,ZoneOffset.UTC)));
+        head=null; denied(this::verifyOnly);
+    }
+    @Test void redeploymentRejectsExcessiveCheckpointCountBeforeReadingObjects() {
+        setup(false);
+        head=new CheckpointedErasureLedger.Head("large",new ErasureCheckpoint(1,REALM,EPOCH,1,5001,"0".repeat(64),"",NOW.toString()));
+        denied(this::verifyOnly); assertEquals(0,source.writes);
+    }
+    @Test void redeploymentRejectsCompletionChangeEvenWithoutCheckpointAdvancement() {
+        setup(true);
+        var changing=new CheckpointedErasureLedger.Store() {
+            int calls;
+            public CheckpointedErasureLedger.Head read() {
+                if (++calls==6) ledger.ensureCompletion(ErasureCompletion.observed(record,EPOCH,NOW));
+                return head;
+            }
+            public void append(CheckpointedErasureLedger.Head h,ErasureCheckpoint cp) { fail("no writes"); }
+        };
+        denied(()->ErasureLedgerMigration.verifyReadOnly(source,cipher,changing,REALM,EPOCH,Clock.fixed(NOW,ZoneOffset.UTC)));
+    }
 }

@@ -28,7 +28,7 @@ export function renderLocalDeployment(source, role) {
             umask 077
             # Read-only preflight must finish BEFORE touching operational configuration.
             test -x /home/luha/erasure-tools/local-ledger-preflight
-            /home/luha/erasure-tools/local-ledger-preflight ${role} '\${{ vars.ERASURE_LEDGER_LOCAL_STORE_ID }}'`)
+            printf '%s' '\${{ steps.lifecycle.outputs.payload }}' | /home/luha/erasure-tools/local-ledger-preflight ${role} '\${{ vars.ERASURE_LEDGER_LOCAL_STORE_ID }}'`)
   const service=role==='api' ? 'api' : 'toilet-batch'
   const userLine=`              ${service}:\n                user: "1000:1000"`
   replace(`              ${service}:`,userLine)
