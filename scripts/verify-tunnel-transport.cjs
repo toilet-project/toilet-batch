@@ -18,21 +18,53 @@ const {steps:newSteps,...newJob}=newJobs[key];
 assert.deepEqual(oldJob,newJob);
 const i=oldSteps.findIndex(s=>s.uses?.startsWith('appleboy/ssh-action@'));
 assert.equal(i,oldSteps.length-1);
-// Permit only the reviewed US ledger preparation delta; all other build and transport fields stay pinned.
+// Permit only the reviewed LOCAL preparation delta; all unrelated fields stay pinned.
 const lifecycleBaseline = oldSteps.find(s => s.id === 'lifecycle');
 assert.ok(lifecycleBaseline, 'Pinned lifecycle preparation step required');
 Object.assign(lifecycleBaseline.env, {
- ERASURE_LEDGER_DEPLOYMENT_PROFILE: 'us-runtime',
- ERASURE_LEDGER_US_DEPLOYMENT_APPROVED: "${{ vars.ERASURE_LEDGER_US_DEPLOYMENT_APPROVED || 'false' }}",
- ERASURE_LEDGER_ENDPOINT: '${{ vars.ERASURE_LEDGER_US_RUNTIME_ENDPOINT }}',
- ERASURE_LEDGER_BUCKET: 'geupddong-account-erasure-ledger-us',
- ERASURE_LEDGER_ACCESS_KEY_ID: '${{ secrets.ERASURE_LEDGER_US_RUNTIME_ACCESS_KEY_ID }}',
- ERASURE_LEDGER_SECRET_ACCESS_KEY: '${{ secrets.ERASURE_LEDGER_US_RUNTIME_SECRET_ACCESS_KEY }}',
+ ERASURE_LEDGER_DEPLOYMENT_PROFILE: 'local-paused',
+ ERASURE_LEDGER_PROVIDER: 'LOCAL',
+ ERASURE_LEDGER_LOCAL_DEPLOYMENT_APPROVED: "${{ vars.ERASURE_LEDGER_LOCAL_DEPLOYMENT_APPROVED || 'false' }}",
+ ERASURE_LEDGER_LOCAL_ACCEPTANCE_VERIFIED: 'false',
+ ERASURE_LEDGER_LOCAL_DIRECTORY: '/home/luha/geupddong-erasure-ledger',
+ ERASURE_LEDGER_LOCAL_STORE_ID: '${{ vars.ERASURE_LEDGER_LOCAL_STORE_ID }}',
+ LOCAL_LEDGER_RUNTIME_UID: '1000',
+ LOCAL_LEDGER_RUNTIME_GID: '1000',
 });
+for (const field of ['ERASURE_LEDGER_ENDPOINT','ERASURE_LEDGER_BUCKET',
+ 'ERASURE_LEDGER_ACCESS_KEY_ID','ERASURE_LEDGER_SECRET_ACCESS_KEY']) delete lifecycleBaseline.env[field];
 assert.deepEqual(oldSteps.slice(0,i),newSteps.slice(0,i),'Build steps must not change');
 assert.equal(newSteps.length,oldSteps.length+2);
 const [prepare,deploy,cleanup]=newSteps.slice(i);
-assert.equal(deploy.env.DEPLOY_SCRIPT,oldSteps[i].with.script,'Remote deployment commands must be identical');
+// Exact allowlisted edits to the old script, NOT a blanket exemption for remote commands.
+const role = 'batch';
+let expectedScript=oldSteps[i].with.script;
+function replaceOnce(before,after) {
+ assert.equal(expectedScript.split(before).length,2,'Pinned remote baseline drift');
+ expectedScript=expectedScript.replace(before,after);
+}
+replaceOnce('set -eu\numask 077', 'set -eu\numask 077\n'
+ +'# Read-only preflight must finish BEFORE touching operational configuration.\n'
+ +'test -x /home/luha/erasure-tools/local-ledger-preflight\n'
+ +"/home/luha/erasure-tools/local-ledger-preflight "+role+" '${{ vars.ERASURE_LEDGER_LOCAL_STORE_ID }}'");
+const service=role==='api'?'api':'toilet-batch';
+replaceOnce('  '+service+':','  '+service+':\n    user: "1000:1000"');
+const mount='      - type: bind\n'
+ +'        source: /home/luha/geupddong-erasure-ledger\n'
+ +'        target: /home/luha/geupddong-erasure-ledger\n'
+ +'        read_only: false\n'
+ +'        bind:\n'
+ +'          create_host_path: false';
+if(role==='api'){
+ replaceOnce('    container_name: toilet-api','    container_name: toilet-api\n    volumes:\n'+mount);
+ replaceOnce('docker compose pull','docker compose pull api');
+ replaceOnce('docker compose up -d --wait --wait-timeout 120 redis api',
+  'docker compose up -d --no-deps --wait --wait-timeout 120 api');
+} else {
+ replaceOnce('      - ./region-results:/var/lib/toilet-region',
+  '      - ./region-results:/var/lib/toilet-region\n'+mount);
+}
+assert.equal(deploy.env.DEPLOY_SCRIPT,expectedScript,'Remote commands must match only the allowlisted LOCAL delta');
 assert.equal(cleanup.if,'always()');
 assert.equal(deploy.env.TUNNEL_SERVICE_TOKEN_ID,'${{ secrets.TUNNEL_DEPLOY_ACCESS_CLIENT_ID }}');
 assert.equal(deploy.env.TUNNEL_SERVICE_TOKEN_SECRET,'${{ secrets.TUNNEL_DEPLOY_ACCESS_CLIENT_SECRET }}');
@@ -50,5 +82,5 @@ for(const script of [...newSteps.filter(s=>s.run).map(s=>s.run),deploy.env.DEPLO
  const check=spawnSync(process.env.TUNNEL_BASH || 'bash',['-n'],{input:script,encoding:'utf8',timeout:10000});
  assert.equal(check.status,0,check.stderr || String(check.error));
 }
-console.log('PASS: baseline '+baselineCommit+' plus explicit US ledger configuration delta; remaining build/remote/transport invariants and shell syntax verified.');
+console.log('PASS: baseline '+baselineCommit+' plus exact LOCAL preparation delta; remaining build/remote/transport invariants and shell syntax verified.');
 console.log('No credentials, SSH, image push, or deployment executed.');

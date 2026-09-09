@@ -1,4 +1,4 @@
-# LOCAL preparation only: explicit deployment approval required; account actions remain disabled.
+# REVIEW CANDIDATE ONLY: not installed or approved for production.
 name: Toilet Batch CI/CD Pipeline
 
 on:

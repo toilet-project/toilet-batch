@@ -1,0 +1,38 @@
+name: Local ledger preparation validation
+on:
+  pull_request:
+    branches: [main, develop]
+  push:
+    branches: [feature/local-erasure-ledger]
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Local preparation config and candidate generation
+        run: node --test scripts/prepare-account-lifecycle.test.mjs scripts/prepare-local-ledger.test.mjs scripts/render-local-deployment.test.mjs scripts/us-ledger-preparation.test.mjs
+      - name: Preflight guards without production access
+        run: python3 -m unittest discover -s scripts -p test_local_ledger_preflight.py
+      - name: Require isolated Docker for full regression
+        run: docker info > /dev/null
+      - name: Offline fixtures and package only
+        run: |
+          chmod +x gradlew
+          ./gradlew test bootJar --no-daemon --console=plain
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: local-ledger-test-results
+          path: build/test-results/test

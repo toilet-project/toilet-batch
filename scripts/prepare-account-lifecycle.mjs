@@ -1,5 +1,6 @@
 import {appendFileSync} from 'node:fs'
 import {pathToFileURL} from 'node:url'
+import {prepareLocalPaused} from './prepare-local-ledger.mjs'
 
 const fail = code => { throw new Error(code) }
 const safe = value => {
@@ -8,6 +9,8 @@ const safe = value => {
   return s
 }
 export function prepare(e, role) {
+  if (e.ERASURE_LEDGER_DEPLOYMENT_PROFILE === 'local-paused') return prepareLocalPaused(e,role)
+  if (e.ERASURE_LEDGER_PROVIDER && e.ERASURE_LEDGER_PROVIDER !== 'R2') fail('LIFECYCLE_INVALID_PROVIDER_PROFILE')
   if (!['api','batch'].includes(role)) fail('LIFECYCLE_INVALID_ROLE')
   if (e.ACCOUNT_LIFECYCLE_DEPLOYMENT_APPROVED !== 'true') fail('LIFECYCLE_DEPLOYMENT_APPROVAL_REQUIRED')
   // This deployment stage is intentionally preparation-only. Activation needs a separately reviewed release.

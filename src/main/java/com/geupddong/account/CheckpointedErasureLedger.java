@@ -4,7 +4,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.util.*;
 
-/** No SQL/Redis deletion is permitted until both R2 and independent Git acknowledgement succeed. */
+/** No SQL/Redis deletion is permitted until durable records and independent Git acknowledgement succeed. */
 public final class CheckpointedErasureLedger implements ErasureLedger {
     public record Head(String revision, ErasureCheckpoint checkpoint) { }
     public interface Store {
@@ -70,7 +70,7 @@ public final class CheckpointedErasureLedger implements ErasureLedger {
         if (!matches(cp,catalogue)) {
             var next=new ErasureCheckpoint(1,realm,epoch,Math.addExact(cp.sequence(),1),catalogue.size(),
                     cp.inventoryDigest(catalogue),cp.digest(),now.toString());
-            store.append(head,next); // Timeout/CAS failure blocks deletion; exact intent retry reconciles R2.
+            store.append(head,next); // Timeout/CAS failure blocks deletion; exact intent retry reconciles storage.
         }
     }
     private static void fail() { throw new IllegalStateException("ERASURE_CHECKPOINT_MISMATCH"); }

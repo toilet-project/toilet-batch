@@ -1,0 +1,12 @@
+# Reviewed preparation template only. Do not apply before directory/migration/UID acceptance.
+# Combine with the batch compose file; does not activate any account lifecycle flags.
+services:
+  toilet-batch:
+    user: "1000:1000"
+    volumes:
+      - type: bind
+        source: /home/luha/geupddong-erasure-ledger
+        target: /home/luha/geupddong-erasure-ledger
+        read_only: false
+        bind:
+          create_host_path: false

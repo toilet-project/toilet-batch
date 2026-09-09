@@ -1,7 +1,7 @@
 package com.geupddong.account;
 
 public interface ErasureLedger extends AutoCloseable {
-    /** Durable external acknowledgement is required BEFORE Redis or SQL erasure. */
+    /** Durable acknowledgement is required BEFORE Redis or SQL erasure; production also checks an independent inventory. */
     void ensureRecorded(ErasureRecord record);
     @Override default void close() { }
 }
