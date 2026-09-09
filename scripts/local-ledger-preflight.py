@@ -30,6 +30,23 @@ def config(name):
     stable['started']=item['State']['StartedAt']
     return values,hashlib.sha256(json.dumps(stable,sort_keys=True).encode()).hexdigest()
 
+def directory_probe(image, store_id, tools):
+    require(re.fullmatch(r'sha256:[a-f0-9]{64}',image))
+    parse_args(['api',store_id])
+    root='/home/luha/geupddong-erasure-ledger'
+    # --mount never creates an absent host path. The actual service image and exact
+    # production directory are tested; no app entrypoint, secrets, DB or network.
+    args=['docker','run','--rm','--pull=never','--network','none','--read-only',
+          '--user','1000:1000','--cap-drop','ALL','--security-opt','apparmor=docker-default',
+          '--memory','128m','--cpus','0.5','--pids-limit','64',
+          '--label','geupddong.local-ledger-probe=true',
+          '--mount','type=bind,source='+root+',target='+root,
+          '--mount','type=bind,source='+str(tools/'lib')+',target=/verification/lib,readonly',
+          '--entrypoint','java',image,'-Xmx64m','-XX:ActiveProcessorCount=1',
+          '-cp','/verification/lib/*','com.geupddong.account.LocalLedgerDirectoryProbe',store_id]
+    result=subprocess.run(args,capture_output=True,text=True,timeout=40)
+    require(result.returncode==0 and result.stdout.strip()=='LOCAL_DOCKER_DIRECTORY_PASS records=0')
+
 def main():
     role,store_id=parse_args(sys.argv[1:]); require(os.getuid()==1000 and os.getgid()==1000)
     configs={r:config('toilet-'+r) for r in ('api','batch')}
@@ -51,13 +68,17 @@ def main():
            'CHECKPOINT_TOKEN':source.get('ERASURE_CHECKPOINT_GITHUB_TOKEN',''),
            'DATABASE_EPOCH':source.get('ERASURE_CHECKPOINT_DATABASE_EPOCH','')}
     require(all(child.values()))
-    tools=Path('/home/luha/erasure-tools/local-cutover')
+    tools=Path('/home/luha/erasure-tools/local-cutover-home')
     require(tools.resolve()==tools and not tools.is_symlink())
     # New library directory is installed separately; never silently use the old restore-tool jar.
     result=subprocess.run(['java','-Xmx128m','-XX:ActiveProcessorCount=1','-cp',str(tools/'lib')+'/*',
                            'com.geupddong.account.LocalLedgerEmptyPreflight'],env=child,capture_output=True,text=True,timeout=150)
     require(all(before==config('toilet-'+r)[1] for r,(_,before) in configs.items()))
     require(result.returncode==0 and result.stdout.strip()=='LOCAL_EMPTY_PREFLIGHT_PASS records=0 checkpointMatched=true directoryVerified=true activationAllowed=false')
+    image=subprocess.run(['docker','inspect','--format','{{.Image}}','toilet-'+role],capture_output=True,text=True,timeout=15)
+    require(image.returncode==0)
+    directory_probe(image.stdout.strip(),store_id,tools)
+    require(all(before==config('toilet-'+r)[1] for r,(_,before) in configs.items()))
     print(result.stdout.strip())
 
 if __name__=='__main__':

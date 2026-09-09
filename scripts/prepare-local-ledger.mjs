@@ -22,7 +22,7 @@ export function prepareLocalPaused(e, role) {
     if (e[key] !== 'false') fail('LOCAL_LEDGER_ACTIVATION_NOT_APPROVED')
   // An acceptance/activation release must be reviewed separately from this preparation-only generator.
   if ((e.ERASURE_LEDGER_LOCAL_ACCEPTANCE_VERIFIED ?? 'false') !== 'false') fail('LOCAL_LEDGER_ACTIVATION_NOT_APPROVED')
-  if (e.ERASURE_LEDGER_LOCAL_DIRECTORY !== '/var/lib/geupddong-erasure-ledger' ||
+  if (e.ERASURE_LEDGER_LOCAL_DIRECTORY !== '/home/luha/geupddong-erasure-ledger' ||
       e.LOCAL_LEDGER_RUNTIME_UID !== '1000' || e.LOCAL_LEDGER_RUNTIME_GID !== '1000') fail('LOCAL_LEDGER_RUNTIME_PLAN_MISMATCH')
 
   const uuid = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/
@@ -46,7 +46,7 @@ export function prepareLocalPaused(e, role) {
     ACCOUNT_LIFECYCLE_MAINTENANCE: 'true', ACCOUNT_RETENTION_ENABLED: 'false', ACCOUNT_ERASURE_ENABLED: 'false',
     ERASURE_LEDGER_ENABLED: 'false', ERASURE_LEDGER_CATALOGUE_ENABLED: 'false', ERASURE_CHECKPOINT_ENABLED: 'false',
     ERASURE_LEDGER_PROVIDER: 'LOCAL', ERASURE_LEDGER_LOCAL_ACCEPTANCE_VERIFIED: 'false',
-    ERASURE_LEDGER_LOCAL_DIRECTORY: '/var/lib/geupddong-erasure-ledger', ERASURE_LEDGER_LOCAL_STORE_ID: storeId,
+    ERASURE_LEDGER_LOCAL_DIRECTORY: '/home/luha/geupddong-erasure-ledger', ERASURE_LEDGER_LOCAL_STORE_ID: storeId,
     ERASURE_LEDGER_REALM: 'production', ERASURE_LEDGER_ACTIVE_KEY_ID: activeKey,
     ERASURE_LEDGER_KEYS_JSON: JSON.stringify(keys), ERASURE_CHECKPOINT_GITHUB_TOKEN: token,
     ERASURE_CHECKPOINT_DATABASE_EPOCH: epoch, REDIS_PASSWORD: redis,

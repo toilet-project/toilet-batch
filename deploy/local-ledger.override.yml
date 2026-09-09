@@ -5,8 +5,8 @@ services:
     user: "1000:1000"
     volumes:
       - type: bind
-        source: /var/lib/geupddong-erasure-ledger
-        target: /var/lib/geupddong-erasure-ledger
+        source: /home/luha/geupddong-erasure-ledger
+        target: /home/luha/geupddong-erasure-ledger
         read_only: false
         bind:
           create_host_path: false

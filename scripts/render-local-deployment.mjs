@@ -14,7 +14,7 @@ export function renderLocalDeployment(source, role) {
           ERASURE_LEDGER_PROVIDER: 'LOCAL'
           ERASURE_LEDGER_LOCAL_DEPLOYMENT_APPROVED: \${{ vars.ERASURE_LEDGER_LOCAL_DEPLOYMENT_APPROVED || 'false' }}
           ERASURE_LEDGER_LOCAL_ACCEPTANCE_VERIFIED: 'false'
-          ERASURE_LEDGER_LOCAL_DIRECTORY: '/var/lib/geupddong-erasure-ledger'
+          ERASURE_LEDGER_LOCAL_DIRECTORY: '/home/luha/geupddong-erasure-ledger'
           ERASURE_LEDGER_LOCAL_STORE_ID: \${{ vars.ERASURE_LEDGER_LOCAL_STORE_ID }}
           LOCAL_LEDGER_RUNTIME_UID: '1000'
           LOCAL_LEDGER_RUNTIME_GID: '1000'`)
@@ -33,8 +33,8 @@ export function renderLocalDeployment(source, role) {
   const userLine=`              ${service}:\n                user: "1000:1000"`
   replace(`              ${service}:`,userLine)
   const mount=`                  - type: bind
-                    source: /var/lib/geupddong-erasure-ledger
-                    target: /var/lib/geupddong-erasure-ledger
+                    source: /home/luha/geupddong-erasure-ledger
+                    target: /home/luha/geupddong-erasure-ledger
                     read_only: false
                     bind:
                       create_host_path: false`

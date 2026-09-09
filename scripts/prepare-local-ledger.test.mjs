@@ -8,7 +8,7 @@ const base = {
   ERASURE_LEDGER_DEPLOYMENT_PROFILE:'local-paused', ERASURE_LEDGER_PROVIDER:'LOCAL',
   ACCOUNT_LIFECYCLE_MAINTENANCE:'true', ACCOUNT_RETENTION_ENABLED:'false', ACCOUNT_ERASURE_ENABLED:'false',
   ERASURE_LEDGER_ENABLED:'false', ERASURE_LEDGER_CATALOGUE_ENABLED:'false', ERASURE_CHECKPOINT_ENABLED:'false',
-  ERASURE_LEDGER_LOCAL_DIRECTORY:'/var/lib/geupddong-erasure-ledger',
+  ERASURE_LEDGER_LOCAL_DIRECTORY:'/home/luha/geupddong-erasure-ledger',
   ERASURE_LEDGER_LOCAL_STORE_ID:'11111111-1111-1111-1111-111111111111',
   ERASURE_CHECKPOINT_DATABASE_EPOCH:'22222222-2222-2222-2222-222222222222',
   LOCAL_LEDGER_RUNTIME_UID:'1000', LOCAL_LEDGER_RUNTIME_GID:'1000', ERASURE_LEDGER_REALM:'production',
@@ -49,7 +49,7 @@ test('no remote storage settings are even read in local mode', () => {
 test('root or mismatched UID and arbitrary paths are rejected', () => {
   for (const k of ['LOCAL_LEDGER_RUNTIME_UID','LOCAL_LEDGER_RUNTIME_GID'])
     for (const value of ['0','1001','','1000:1000']) assert.throws(()=>prepareLocalPaused({...base,[k]:value},'api'))
-  for (const p of ['/','/tmp/ledger','/var/lib/geupddong-erasure-ledger/','/var/lib/../tmp/ledger'])
+  for (const p of ['/','/tmp/ledger','/home/luha/geupddong-erasure-ledger/','/var/lib/../tmp/ledger'])
     assert.throws(()=>prepareLocalPaused({...base,ERASURE_LEDGER_LOCAL_DIRECTORY:p},'api'))
 })
 test('pinned identities and checkpoint credential cannot be omitted', () => {

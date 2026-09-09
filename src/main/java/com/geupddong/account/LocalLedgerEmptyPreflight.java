@@ -22,7 +22,7 @@ public final class LocalLedgerEmptyPreflight {
     public static void main(String[] args) {
         try {
             require(args.length==0 && env("LOCAL_PREFLIGHT_READONLY").equals("approved"));
-            Path root=Path.of("/var/lib/geupddong-erasure-ledger");
+            Path root=Path.of("/home/luha/geupddong-erasure-ledger");
             require(((Number)Files.getAttribute(root,"unix:uid",LinkOption.NOFOLLOW_LINKS)).intValue()==1000);
             require(((Number)Files.getAttribute(root,"unix:gid",LinkOption.NOFOLLOW_LINKS)).intValue()==1000);
             var local=new FileErasureObjectStore(root,"production",env("LOCAL_STORE_ID"));
