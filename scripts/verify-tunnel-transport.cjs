@@ -64,7 +64,18 @@ if(role==='api'){
  replaceOnce('      - ./region-results:/var/lib/toilet-region',
   '      - ./region-results:/var/lib/toilet-region\n'+mount);
 }
-assert.equal(deploy.env.DEPLOY_SCRIPT,expectedScript,'Remote commands must match only the allowlisted LOCAL delta');
+// Approved maintenance preparation adds exactly one preflight, two env fields and one bind.
+replaceOnce('test -x /home/luha/erasure-tools/local-ledger-preflight',
+ '/home/luha/.local/bin/maintenance-preflight '+role+'\ntest -x /home/luha/erasure-tools/local-ledger-preflight');
+replaceOnce('    container_name: toilet-'+role,
+ '    container_name: toilet-'+role+'\n    environment:\n'
+ +"      ERASURE_MAINTENANCE_LOCK_ENABLED: 'true'\n"
+ +"      ERASURE_MAINTENANCE_DIRECTORY: '/home/luha/geupddong-maintenance'");
+replaceOnce(mount,mount+'\n      - type: bind\n'
+ +'        source: /home/luha/geupddong-maintenance\n'
+ +'        target: /home/luha/geupddong-maintenance\n'
+ +'        read_only: false\n        bind:\n          create_host_path: false');
+assert.equal(deploy.env.DEPLOY_SCRIPT,expectedScript,'Remote commands must match only the allowlisted LOCAL and maintenance delta');
 assert.equal(cleanup.if,'always()');
 assert.equal(deploy.env.TUNNEL_SERVICE_TOKEN_ID,'${{ secrets.TUNNEL_DEPLOY_ACCESS_CLIENT_ID }}');
 assert.equal(deploy.env.TUNNEL_SERVICE_TOKEN_SECRET,'${{ secrets.TUNNEL_DEPLOY_ACCESS_CLIENT_SECRET }}');

@@ -2,6 +2,7 @@ import {test} from 'node:test'
 import assert from 'node:assert/strict'
 import {readFileSync} from 'node:fs'
 import {renderLocalDeployment} from './render-local-deployment.mjs'
+import {renderMaintenancePreparation} from './render-maintenance-deployment.mjs'
 const source=readFileSync(new URL('../deploy/us-paused.baseline.yml',import.meta.url),'utf8')
 const role=source.includes('name: Toilet API') ? 'api' : 'batch'
 test('candidate keeps account actions paused and does not read R2 credentials',()=>{
@@ -33,8 +34,8 @@ test('template drift and unknown roles fail closed',()=>{
 
 test('active workflow exactly matches reviewed LOCAL preparation candidate',()=>{
   const active=readFileSync(new URL('../.github/workflows/deploy.yml',import.meta.url),'utf8')
-  const body=text=>text.replaceAll('\r\n','\n').replace(/^#.*\n/,'').trim()
-  assert.equal(body(active),body(renderLocalDeployment(source,role)))
+  const body=text=>text.replaceAll('\r\n','\n').replace(/^(#.*\n)+/,'').trim()
+  assert.equal(body(active),body(renderMaintenancePreparation(renderLocalDeployment(source,role),role)))
   assert.ok(active.includes('branches: [ "main" ]'))
   assert.ok(!active.includes('workflow_dispatch:'))
 })

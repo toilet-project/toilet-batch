@@ -16,6 +16,7 @@ class AccountErasureWorkerTest {
     private AccountErasureWorker worker;
     private AccountSessionCleaner sessions;
     private com.geupddong.account.ErasureLedger ledger;
+    private AccountMaintenanceGuard guard;
     private org.springframework.transaction.support.TransactionTemplate transaction;
     private final LocalDateTime now = LocalDateTime.of(2026, 9, 6, 2, 30);
 
@@ -25,9 +26,11 @@ class AccountErasureWorkerTest {
         jdbc = new JdbcTemplate(ds);
         sessions = mock(AccountSessionCleaner.class);
         ledger = mock(com.geupddong.account.ErasureLedger.class);
+        guard = mock(AccountMaintenanceGuard.class);
+        when(guard.acquire()).thenReturn(() -> {});
         var transactions = new DataSourceTransactionManager(ds);
         transaction = new org.springframework.transaction.support.TransactionTemplate(transactions);
-        worker = new AccountErasureWorker(jdbc, sessions, transactions, ledger, "production", true, false);
+        worker = new AccountErasureWorker(jdbc, sessions, transactions, ledger, "production", true, false, guard);
         jdbc.execute("CREATE TABLE app_user(user_id BIGINT PRIMARY KEY, status VARCHAR(30), created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)");
         jdbc.execute("CREATE TABLE account_withdrawal(user_id BIGINT PRIMARY KEY, "
                 + "purge_after TIMESTAMP, next_attempt_at TIMESTAMP, attempts INT DEFAULT 0, last_failure_code VARCHAR(50), withdrawal_key CHAR(36), "
@@ -60,6 +63,52 @@ class AccountErasureWorkerTest {
         jdbc.update("INSERT INTO account_withdrawal(user_id,purge_after,next_attempt_at,withdrawal_key) VALUES(?,?,?,?)", id, due, due, UUID.randomUUID().toString());
     }
 
+    @Test void leaseRemainsHeldThroughCommit() {
+        var held=new java.util.concurrent.atomic.AtomicBoolean();
+        var committed=new java.util.concurrent.atomic.AtomicBoolean();
+        when(guard.acquire()).thenAnswer(call->{
+            assertFalse(org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive());
+            held.set(true);
+            return (AccountMaintenanceGuard.Lease)()->{assertTrue(committed.get()); held.set(false);};
+        });
+        doAnswer(call->{
+            assertTrue(held.get());
+            org.springframework.transaction.support.TransactionSynchronizationManager.registerSynchronization(
+                new org.springframework.transaction.support.TransactionSynchronization(){
+                    @Override public void afterCommit(){assertTrue(held.get()); committed.set(true);}
+                });
+            return null;
+        }).when(ledger).ensureRecorded(any());
+        assertTrue(worker.eraseIfDue(1,now));
+        assertFalse(held.get()); assertTrue(committed.get());
+    }
+    @Test void leaseRemainsHeldThroughRollback() {
+        var completed=new java.util.concurrent.atomic.AtomicBoolean();
+        when(guard.acquire()).thenReturn(()->assertTrue(completed.get()));
+        doAnswer(call->{
+            org.springframework.transaction.support.TransactionSynchronizationManager.registerSynchronization(
+                new org.springframework.transaction.support.TransactionSynchronization(){
+                    @Override public void afterCompletion(int status){
+                        assertEquals(STATUS_ROLLED_BACK,status); completed.set(true);
+                    }
+                });
+            throw new IllegalStateException("synthetic");
+        }).when(ledger).ensureRecorded(any());
+        assertThrows(IllegalStateException.class,()->worker.eraseIfDue(1,now));
+        assertTrue(completed.get());
+        assertEquals(1,jdbc.queryForObject("SELECT COUNT(*) FROM app_user",Integer.class));
+    }
+    @Test void busyLeaseDoesNotReachLedgerOrRedis() {
+        when(guard.acquire()).thenThrow(new IllegalStateException("busy"));
+        assertThrows(IllegalStateException.class,()->worker.eraseIfDue(1,now));
+        verifyNoInteractions(ledger,sessions);
+        assertEquals(1,jdbc.queryForObject("SELECT COUNT(*) FROM app_user",Integer.class));
+    }
+    @Test void rejectsOuterTransactionBeforeAcquiringLease() {
+        transaction.executeWithoutResult(status->
+            assertThrows(IllegalStateException.class,()->worker.eraseIfDue(1,now)));
+        verifyNoInteractions(guard,ledger,sessions);
+    }
     @Test void erasesOnlyIdentityAndPreservesStructuredReport() {
         assertTrue(worker.eraseIfDue(1, now));
         assertEquals(0, jdbc.queryForObject("SELECT COUNT(*) FROM app_user", Integer.class));
@@ -77,9 +126,9 @@ class AccountErasureWorkerTest {
         for (boolean maintenance : new boolean[]{false, true}) {
             var db = mock(JdbcTemplate.class);
             var manager = mock(org.springframework.transaction.PlatformTransactionManager.class);
-            var stopped = new AccountErasureWorker(db, sessions, manager, ledger, "production", maintenance, maintenance);
+            var stopped = new AccountErasureWorker(db, sessions, manager, ledger, "production", maintenance, maintenance, guard);
             assertThrows(IllegalStateException.class, () -> stopped.eraseIfDue(1, now));
-            verifyNoInteractions(db, manager, sessions, ledger);
+            verifyNoInteractions(db, manager, sessions, ledger, guard);
         }
     }
 

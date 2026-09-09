@@ -18,17 +18,20 @@ public class AccountErasureWorker {
     private final String realm;
     private final boolean enabled;
     private final boolean maintenance;
+    private final AccountMaintenanceGuard guard;
 
     public AccountErasureWorker(JdbcTemplate jdbc, AccountSessionCleaner sessions,
             PlatformTransactionManager transactions, com.geupddong.account.ErasureLedger ledger,
             @org.springframework.beans.factory.annotation.Value("${erasure.ledger.realm:production}") String realm,
             @org.springframework.beans.factory.annotation.Value("${batch.account-erasure.enabled:false}") boolean enabled,
-            @org.springframework.beans.factory.annotation.Value("${account.lifecycle.maintenance:true}") boolean maintenance) {
+            @org.springframework.beans.factory.annotation.Value("${account.lifecycle.maintenance:true}") boolean maintenance,
+            AccountMaintenanceGuard guard) {
         this.jdbc = jdbc;
         this.sessions = sessions;
         this.transaction = new TransactionTemplate(transactions);
         this.ledger = ledger; this.realm = realm;
         this.enabled = enabled; this.maintenance = maintenance;
+        this.guard = guard;
     }
 
     public List<Long> findDue(LocalDateTime cutoff, long afterId, int limit) {
@@ -39,6 +42,10 @@ public class AccountErasureWorker {
 
     public boolean eraseIfDue(long id, LocalDateTime cutoff) {
         if (!enabled || maintenance) throw new IllegalStateException("ACCOUNT_ERASURE_PAUSED");
+        // REQUIRED must not join an outer transaction and release the lease before its commit.
+        if (org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive())
+            throw new IllegalStateException("ACCOUNT_ERASURE_OUTER_TRANSACTION_REJECTED");
+        try (var lease = guard.acquire()) {
         return Boolean.TRUE.equals(transaction.execute(status -> {
             var users = jdbc.queryForList("SELECT status FROM app_user WHERE user_id=? FOR UPDATE", String.class, id);
             if (users.isEmpty() || !"WITHDRAWN".equals(users.getFirst())) return false;
@@ -59,6 +66,7 @@ public class AccountErasureWorker {
             AccountErasureSql.erase(jdbc, id);
             return true;
         }));
+        }
     }
 
     public void recordFailure(long id, LocalDateTime now) {
