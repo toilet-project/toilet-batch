@@ -18,7 +18,7 @@ public final class ProtectedErasureLedgerFactory {
             String realm=env.getRequiredProperty("erasure.ledger.realm");
             String epoch=env.getRequiredProperty("ERASURE_CHECKPOINT_DATABASE_EPOCH");
             if (!java.util.UUID.fromString(epoch).toString().equals(epoch)) throw new IllegalArgumentException();
-            var store=GitHubErasureCheckpointStore.configured(env.getRequiredProperty("ERASURE_CHECKPOINT_GITHUB_TOKEN"));
+            var store=GitHubErasureHistoryStore.configured(env.getRequiredProperty("ERASURE_CHECKPOINT_GITHUB_TOKEN"));
             CheckpointedErasureLedger.Exclusive lock=work->jdbc.execute((ConnectionCallback<Void>) connection->{
                 boolean held=false;
                 try {

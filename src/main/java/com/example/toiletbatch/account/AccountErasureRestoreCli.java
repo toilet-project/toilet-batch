@@ -56,7 +56,7 @@ public final class AccountErasureRestoreCli {
             try (var ledger = ErasureLedgerFactory.configured(env)) {
                 int expected = Integer.parseInt(env.getRequiredProperty("ERASURE_RESTORE_EXPECTED_OBJECTS"));
                 stage = "ledger-snapshot";
-                var checkpointStore = GitHubErasureCheckpointStore.configured(
+                var checkpointStore = GitHubErasureHistoryStore.configured(
                         env.getRequiredProperty("ERASURE_CHECKPOINT_GITHUB_TOKEN"));
                 var records = VerifiedErasureSnapshot.read(ledger, checkpointStore,
                         env.getRequiredProperty("erasure.ledger.realm"),

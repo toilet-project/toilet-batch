@@ -15,7 +15,8 @@ import java.util.regex.Pattern;
 
 /**
  * Private, write-once encrypted files on a pre-provisioned Linux filesystem.
- * No auto-bootstrap, overwrite, delete, cloud fallback, or local "latest" checkpoint.
+ * No auto-bootstrap, overwrite, cloud fallback, or local "latest" checkpoint.
+ * Normal ledger callers cannot delete. Only the guarded retirement context uses the package-private removal primitive.
  * A partial write is quarantined by authenticated read-back failure, never repaired by guessing.
  * This protects against ordinary crashes, NOT a hostile root or whole-disk rollback.
  */
@@ -127,6 +128,41 @@ public final class FileErasureObjectStore implements ErasureObjectStore {
                 readFile(target);
                 return null;
             } catch (IOException ignored) { throw unavailable(); }
+        });
+    }
+
+    enum Removal { REMOVED, ALREADY_ABSENT }
+
+    /**
+     * Low-level retirement IO, NOT authorization and deliberately absent from ErasureObjectStore.
+     * A future executor must hold the global maintenance lease and durably acknowledge its exact
+     * prepare record before calling this. The digest is SHA-256 of the original ciphertext, not
+     * the identity digest. Never treat ALREADY_ABSENT as evidence that this process deleted a file.
+     * The independent prepare/journal must prove that absence is an allowed interrupted step.
+     * Directory fsync is repeated even for absence so a lost acknowledgement can be retried.
+     */
+    Removal removeExact(String key, String ciphertextSha256, boolean preparedRetry) {
+        if (ciphertextSha256 == null || !ciphertextSha256.matches("[a-f0-9]{64}")) throw unavailable();
+        Path target = path(key);
+        return locked(() -> {
+            try {
+                byte[] current;
+                try { current = readFile(target); }
+                catch (NoSuchFileException absent) {
+                    if (!preparedRetry) throw unavailable();
+                    safety.syncDirectory(root);
+                    return Removal.ALREADY_ABSENT;
+                }
+                byte[] expected = java.util.HexFormat.of().parseHex(ciphertextSha256);
+                byte[] actual = java.security.MessageDigest.getInstance("SHA-256").digest(current);
+                if (current.length < 34 || !java.security.MessageDigest.isEqual(expected, actual)) throw unavailable();
+                // All cooperating writers take .ledger.lock; a hostile root is outside this contract.
+                // Recheck type, ownership, permissions and single-link status immediately before unlink.
+                safety.file(root, target);
+                Files.delete(target);
+                safety.syncDirectory(root);
+                return Removal.REMOVED;
+            } catch (Exception ignored) { throw unavailable(); }
         });
     }
 
