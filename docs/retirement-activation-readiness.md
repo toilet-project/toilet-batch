@@ -20,8 +20,10 @@
 - [x] 별도 BackupLedgerReplay를 새 라이브러리로 컴파일.
 - [x] Linux ext4 실제 파일/fsync/공통 잠금과 강제 종료 후 새 JVM 재개.
 - [x] Linux 가상 회원 2건 연속 처리·저널 정리·구버전 차단.
-- [ ] Docker를 사용하는 API 전체 CI. 첫 로컬 전체 실행의 MySQL 시험 4개는 Docker 부재로 실패했으며 통과로 계산하지 않는다.
-- [ ] 다중 작업 형식의 실제 GitHub 요청 인수. 현재 Git object graph 모의 전송 시험이다.
+- [x] Docker 기반 API 전체 CI: 251건 중 245 통과, 6 제외, 실패/오류 0. 첫 로컬 전체 실행의 Docker 부재는 CI 실실행으로 보완했다.
+- [x] 배치 전체 CI: 406건 중 398 통과, 8 제외, 실패/오류 0.
+- [x] API·배치 CodeQL 통과, 배포 사전검사 Python 13건 통과.
+- [x] 실제 GitHub 시험 브랜치: 연속 종료 2건·일반 추가·응답 유실·stale CAS·구버전 차단·운영 main 불변. scoped 전송 305회, 성공.
 - [ ] 실제 사본 6개 범위의 증거 수집·검토 파일 갱신 절차 인수.
 
 ## Linux 검증 범위
@@ -32,7 +34,22 @@ RetirementLinuxVerification은 test 클래스에만 있으며 가상 realm·키�
 운영 DB·GitHub 기준 이력·Redis·컨테이너를 변경하지 않았다.
 정전·디스크 전체 롤백·실제 GitHub 인수는 아니다.
 첫 시험 번들 SHA-256: b4e55117d710f3225647f5e065e0b507b3629fd61bc0e700c511e55667415103.
-이후 증거 sealing·캐시 변경은 최종 번들로 재검증해야 한다.
+최종 번들 SHA-256: 1bf510b0fd05811d331bd90a8fa83f4dffceac147e94b6fb5f2eafabada88ac9.
+증거 sealing·캐시 보완이 포함된 최종 번들로 같은 Linux 중단·재개 시험도 재통과했다.
+sealing 세부 검사는 로컬 자동검사이며 Linux 프로브가 실제 운영 검토 자료를 승인한 것은 아니다.
+
+검토용 PR: [API #99](https://github.com/toilet-project/toilet-api/pull/99),
+[배치 #47](https://github.com/toilet-project/toilet-batch/pull/47).
+두 PR은 draft이며 main 병합·운영 배포 승인을 의미하지 않는다.
+
+CI 근거: [API 전체 검사](https://github.com/toilet-project/toilet-api/actions/runs/34406441710),
+[배치 전체 검사](https://github.com/toilet-project/toilet-batch/actions/runs/34406732306).
+각 실행의 XML 결과 파일을 내려받아 통과·제외·실패 건수를 확인했다.
+
+실접속 시험은 비공개 독립 저장소의 별도 시험 브랜치만 생성했다. 가상 건수·해시만 기록했으며
+회원정보·암호화 저널·비밀키·운영 파기 기준을 기록하거나 변경하지 않았다.
+시험 브랜치는 검토용으로 보존했다. 실제 파일 제거는 Linux 가상 데이터 시험에서 별도로 확인했다.
+실접속 프로브는 test 소스 RetirementGitHubVerification이며 평상시 CI에서 자동 실행하지 않는다.
 
 ## 준비 배포·활성화 순서
 
@@ -71,6 +88,6 @@ RetirementLinuxVerification은 test 클래스에만 있으며 가상 realm·키�
 - 이력·저널 삭제, 기준 건수 초기화, 원본 복원으로 장애 숨기기 금지.
 - 전체 서버/디스크 유실·악의적 root에 대한 완전한 복구 보장은 제공하지 않음.
 
-전체 CI·실제 독립 저장소 인수·운영 사본 검토 절차는 미완료다.
+전체 CI와 격리 독립 저장소 실접속은 통과했다. 실제 운영 사본 검토 절차와 준비 배포 인수는 남아 있다.
 이 자료는 운영 활성화 승인서나 법률 검토 완료 증명이 아니다.
 사본 증거의 장기 자동 갱신, 최초 이력 전체 조회 비용, 보류 후보 재처리 순서는 추가 운영 검증이 필요하다.
