@@ -1,0 +1,227 @@
+# MAINTENANCE PREPARATION CANDIDATE: not installed; lifecycle remains paused.
+# LOCAL preparation only: explicit deployment approval required; account actions remain disabled.
+name: Toilet Batch CI/CD Pipeline
+
+on:
+  push:
+    branches: [ "main" ]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: toilet-batch-production
+  cancel-in-progress: false
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1. 소스코드 체크아웃
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node for deployment preflight
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Validate and prepare paused account lifecycle configuration
+        id: lifecycle
+        env:
+          ACCOUNT_LIFECYCLE_DEPLOYMENT_APPROVED: ${{ vars.ACCOUNT_LIFECYCLE_DEPLOYMENT_APPROVED || 'false' }}
+          ACCOUNT_LIFECYCLE_MAINTENANCE: 'true'
+          ACCOUNT_RETENTION_ENABLED: 'false'
+          ACCOUNT_ERASURE_ENABLED: 'false'
+          ERASURE_LEDGER_ENABLED: 'false'
+          ERASURE_LEDGER_CATALOGUE_ENABLED: 'false'
+          ERASURE_LEDGER_DEPLOYMENT_PROFILE: 'local-paused'
+          ERASURE_LEDGER_PROVIDER: 'LOCAL'
+          ERASURE_LEDGER_LOCAL_DEPLOYMENT_APPROVED: ${{ vars.ERASURE_LEDGER_LOCAL_DEPLOYMENT_APPROVED || 'false' }}
+          ERASURE_LEDGER_LOCAL_ACCEPTANCE_VERIFIED: 'false'
+          ERASURE_LEDGER_LOCAL_DIRECTORY: '/home/luha/geupddong-erasure-ledger'
+          ERASURE_LEDGER_LOCAL_STORE_ID: ${{ vars.ERASURE_LEDGER_LOCAL_STORE_ID }}
+          LOCAL_LEDGER_RUNTIME_UID: '1000'
+          LOCAL_LEDGER_RUNTIME_GID: '1000'
+          ERASURE_LEDGER_REALM: ${{ vars.ERASURE_LEDGER_REALM || 'production' }}
+          ERASURE_LEDGER_ACTIVE_KEY_ID: ${{ vars.ERASURE_LEDGER_ACTIVE_KEY_ID || 'k1' }}
+          ERASURE_LEDGER_KEYS_JSON: ${{ secrets.ERASURE_LEDGER_KEYS_JSON }}
+          ERASURE_CHECKPOINT_ENABLED: 'false'
+          ERASURE_CHECKPOINT_GITHUB_TOKEN: ${{ secrets.ERASURE_CHECKPOINT_GITHUB_TOKEN }}
+          ERASURE_CHECKPOINT_DATABASE_EPOCH: ${{ vars.ERASURE_CHECKPOINT_DATABASE_EPOCH }}
+          REDIS_PASSWORD: ${{ secrets.REDIS_PASSWORD }}
+        run: node scripts/prepare-account-lifecycle.mjs batch
+
+      # 2. JDK 21 설정
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+
+      # 3. Gradle 실행 권한 부여 및 빌드
+      - name: Build with Gradle
+        run: |
+          chmod +x ./gradlew
+          ./gradlew clean build -x test
+
+      # 4. Docker Hub 로그인
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      # 5. Docker 이미지 빌드 및 Push
+      - name: Build and Push Docker Image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ secrets.DOCKERHUB_USERNAME }}/toilet-batch:latest
+            ${{ secrets.DOCKERHUB_USERNAME }}/toilet-batch:${{ github.sha }}
+
+      # 6. 미니 PC에 SSH 접속하여 배포 실행 (.env 자동 생성)
+      - name: Prepare pinned Tunnel SSH transport
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' --tlsv1.2 \
+            --connect-timeout 10 --max-time 60 \
+            https://github.com/cloudflare/cloudflared/releases/download/2026.8.3/cloudflared-linux-amd64.deb \
+            -o "$RUNNER_TEMP/cloudflared.deb"
+          printf '%s  %s\n' 660b348d473bba81997445b534e7eaefaf4c4e16331866922326c338a7013dd9 "$RUNNER_TEMP/cloudflared.deb" | sha256sum -c -
+          dpkg-deb --extract "$RUNNER_TEMP/cloudflared.deb" "$RUNNER_TEMP/cloudflared-package"
+
+      - name: Deploy to Mini PC through Tunnel
+        shell: bash
+        env:
+          TUNNEL_SERVICE_TOKEN_ID: ${{ secrets.TUNNEL_DEPLOY_ACCESS_CLIENT_ID }}
+          TUNNEL_SERVICE_TOKEN_SECRET: ${{ secrets.TUNNEL_DEPLOY_ACCESS_CLIENT_SECRET }}
+          DEPLOY_SSH_KEY: ${{ secrets.MINI_PC_KEY }}
+          TUNNEL_KNOWN_HOSTS: ${{ secrets.TUNNEL_DEPLOY_SSH_KNOWN_HOSTS }}
+          TUNNEL_SSH_HOST: ${{ vars.TUNNEL_DEPLOY_SSH_HOST }}
+          TUNNEL_SSH_USER: ${{ secrets.MINI_PC_USERNAME }}
+          DEPLOY_SCRIPT: |
+            set -eu
+            umask 077
+            # Read-only preflight must finish BEFORE touching operational configuration.
+            /home/luha/.local/bin/maintenance-preflight batch
+            test -x /home/luha/erasure-tools/local-ledger-preflight
+            printf '%s' '${{ steps.lifecycle.outputs.payload }}' | /home/luha/erasure-tools/local-ledger-preflight batch '${{ vars.ERASURE_LEDGER_LOCAL_STORE_ID }}'
+            mkdir -p ~/toilet-batch
+            cd ~/toilet-batch
+            mkdir -p region-results
+
+            rollback_dir=$(mktemp -d "$PWD/rollback-preparation.XXXXXXXX")
+            for file in .env .account-lifecycle.env docker-compose.yml; do
+              if [ -f "$file" ]; then cp -p -- "$file" "$rollback_dir/"; fi
+            done
+            if docker container inspect toilet-batch >/dev/null 2>&1; then
+              docker container inspect --format '{{.Image}}' toilet-batch > "$rollback_dir/batch-image-id"
+            fi
+
+            # GitHub Secrets 내용으로 .env 파일 생성
+            cat <<EOF > .env
+            BATCH_PORT=${{ secrets.BATCH_PORT }}
+            SPRING_DB_URL=${{ secrets.SPRING_DB_URL }}
+            SPRING_DB_USERNAME=${{ secrets.SPRING_DB_USERNAME }}
+            SPRING_DB_PASSWORD=${{ secrets.SPRING_DB_PASSWORD }}
+            PUBLIC_DATA_API_KEY=${{ secrets.PUBLIC_DATA_API_KEY }}
+            KAKAO_REST_API_KEY=${{ secrets.KAKAO_REST_API_KEY }}
+            BATCH_FAILURE_WEBHOOK_URL=${{ secrets.BATCH_FAILURE_WEBHOOK_URL }}
+            # Keep disabled until MySQL, Redis grants and backup erasure gates are verified.
+            ACCOUNT_ERASURE_ENABLED=false
+            REDIS_HOST=redis
+            REDIS_PORT=6379
+            BATCH_REGION_ENABLED=${{ vars.BATCH_REGION_ENABLED || 'false' }}
+            REGION_JOURNAL_PATH=/var/lib/toilet-region/normalization.region.jsonl
+            REGION_DAILY_CALL_BUDGET=${{ vars.REGION_DAILY_CALL_BUDGET || '1000' }}
+            REGION_DELAY_MS=${{ vars.REGION_DELAY_MS || '1000' }}
+            REGION_MAX_ITEMS=${{ vars.REGION_MAX_ITEMS || '100' }}
+            EOF
+
+            # Only base64 crosses the shell boundary; JSON and dollar signs remain literal.
+            umask 077
+            printf '%s' '${{ steps.lifecycle.outputs.redisPayload }}' | base64 --decode >> .env
+            printf '%s' '${{ steps.lifecycle.outputs.payload }}' | base64 --decode > .account-lifecycle.env
+            chmod 600 .env .account-lifecycle.env
+
+            cat <<'EOF' > docker-compose.yml
+            services:
+              toilet-batch:
+                user: "1000:1000"
+                image: ${{ secrets.DOCKERHUB_USERNAME }}/toilet-batch:${{ github.sha }}
+                container_name: toilet-batch
+                environment:
+                  ERASURE_MAINTENANCE_LOCK_ENABLED: 'true'
+                  ERASURE_MAINTENANCE_DIRECTORY: '/home/luha/geupddong-maintenance'
+                restart: unless-stopped
+                env_file:
+                  - .env
+                  - .account-lifecycle.env
+                volumes:
+                  - ./region-results:/var/lib/toilet-region
+                  - type: bind
+                    source: /home/luha/geupddong-erasure-ledger
+                    target: /home/luha/geupddong-erasure-ledger
+                    read_only: false
+                    bind:
+                      create_host_path: false
+                  - type: bind
+                    source: /home/luha/geupddong-maintenance
+                    target: /home/luha/geupddong-maintenance
+                    read_only: false
+                    bind:
+                      create_host_path: false
+                networks:
+                  - toilet-network
+                logging:
+                  driver: json-file
+                  options:
+                    max-size: "10m"
+                    max-file: "5"
+
+            networks:
+              toilet-network:
+                external: true
+            EOF
+
+            docker compose -f docker-compose.yml config --quiet
+            docker compose -f docker-compose.yml pull
+            docker compose -f docker-compose.yml up -d --wait --wait-timeout 120 toilet-batch
+        run: |
+          set -euo pipefail
+          umask 077
+          : "${TUNNEL_SERVICE_TOKEN_ID:?missing Access ID}"
+          : "${TUNNEL_SERVICE_TOKEN_SECRET:?missing Access secret}"
+          : "${DEPLOY_SSH_KEY:?missing existing deploy key}"
+          : "${TUNNEL_KNOWN_HOSTS:?missing pinned host keys}"
+          test "$TUNNEL_SSH_HOST" = 'ssh-deploy.geupddong.com'
+          [[ "$TUNNEL_SSH_USER" =~ ^[a-z_][a-z0-9_-]*$ ]]
+          printf '%s\n' "$DEPLOY_SSH_KEY" > "$RUNNER_TEMP/tunnel-deploy-key"
+          printf '%s\n' "$TUNNEL_KNOWN_HOSTS" > "$RUNNER_TEMP/tunnel-known-hosts"
+          printf '%s\n' "$DEPLOY_SCRIPT" > "$RUNNER_TEMP/tunnel-deploy-script"
+          ssh-keygen -y -P '' -f "$RUNNER_TEMP/tunnel-deploy-key" >/dev/null
+          bash -n "$RUNNER_TEMP/tunnel-deploy-script"
+          export PATH="$RUNNER_TEMP/cloudflared-package/usr/bin:$PATH"
+          # No automatic retry: a lost connection does not imply the remote deploy stopped.
+          timeout 10m ssh -F /dev/null -T -i "$RUNNER_TEMP/tunnel-deploy-key" \
+            -o IdentitiesOnly=yes -o BatchMode=yes -o PasswordAuthentication=no \
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$RUNNER_TEMP/tunnel-known-hosts" \
+            -o HostKeyAlias=geupddong-mini-pc -o HostKeyAlgorithms=ssh-ed25519 \
+            -o ForwardAgent=no -o ClearAllForwardings=yes \
+            -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=3 \
+            -o 'ProxyCommand=cloudflared access ssh --hostname %h' \
+            "$TUNNEL_SSH_USER@$TUNNEL_SSH_HOST" 'bash -s' < "$RUNNER_TEMP/tunnel-deploy-script"
+
+      - name: Remove ephemeral Tunnel deploy credentials
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${RUNNER_TEMP:?}"
+          rm -f -- "$RUNNER_TEMP/tunnel-deploy-key" "$RUNNER_TEMP/tunnel-known-hosts" "$RUNNER_TEMP/tunnel-deploy-script"

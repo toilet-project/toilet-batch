@@ -8,7 +8,7 @@ import org.springframework.core.env.StandardEnvironment;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
 
-/** Maintenance-only tool: default dry-run, --record-completions writes ONLY encrypted R2 evidence. */
+/** Maintenance-only tool: default dry-run, optional encrypted LOCAL completion evidence. */
 public final class AccountErasureEvidenceCli {
     private AccountErasureEvidenceCli() { }
     public static void main(String[] args) {
@@ -17,9 +17,11 @@ public final class AccountErasureEvidenceCli {
             boolean record = args.length == 1 && "--record-completions".equals(args[0]);
             if (args.length > 1 || (args.length == 1 && !record && !"--dry-run".equals(args[0]))) throw new IllegalArgumentException();
             var env = new StandardEnvironment();
-            // Attestations are an explicit operational prerequisite, not an automatically acquired lock.
+            // Keep explicit prerequisites; they do not substitute for an actual shared lease.
             if (!"true".equals(env.getProperty("ERASURE_EVIDENCE_WRITERS_STOPPED"))
                     || !"true".equals(env.getProperty("ERASURE_EVIDENCE_INDEPENDENT_INVENTORY_CONFIRMED"))) throw new IllegalStateException();
+            stage = "maintenance-lock";
+            try (var maintenance = new AccountMaintenanceGuard(env).acquire()) {
             stage = "independent-inventory";
             var inventory = ErasureIntentInventory.read(Path.of(env.getRequiredProperty("ERASURE_EVIDENCE_INVENTORY_FILE")),
                     env.getRequiredProperty("ERASURE_EVIDENCE_INVENTORY_SHA256"));
@@ -52,6 +54,7 @@ public final class AccountErasureEvidenceCli {
                 System.out.printf("dryRun=%s records=%d pending=%d absent=%d confirmed=%d wouldRecord=%d unresolvedBackupConfirmations=%d dumpFiles=%d unclassifiedEntries=%d retentionClearance=false%n",
                         !record, result.records(), result.pending(), result.absent(), result.confirmed(), result.wouldRecord(),
                         result.confirmationsWithUnresolvedBackups(), backups.files().size(), backups.unclassifiedEntries());
+            }
             }
         } catch (Exception ignored) {
             System.err.println("ERASURE_EVIDENCE_FAILED: " + stage);
