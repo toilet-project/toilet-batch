@@ -23,10 +23,30 @@ public final class ErasureLedgerMigration {
 
     public ErasureLedgerMigration(ErasureObjectStore source, ErasureObjectStore target, ErasureCipher cipher,
             CheckpointedErasureLedger.Store checkpoints, String realm, String epoch, Clock clock) {
-        if (source == target || !realm.matches("[a-z0-9-]{3,40}")
+        this(source, target, cipher, checkpoints, realm, epoch, clock, false);
+    }
+
+    private ErasureLedgerMigration(ErasureObjectStore source, ErasureObjectStore target, ErasureCipher cipher,
+            CheckpointedErasureLedger.Store checkpoints, String realm, String epoch, Clock clock, boolean readOnly) {
+        if (source == null || source == target || (target == null && !readOnly) || !realm.matches("[a-z0-9-]{3,40}")
                 || !UUID.fromString(epoch).toString().equals(epoch)) throw unavailable();
         this.source=source; this.target=target; this.cipher=cipher; this.checkpoints=checkpoints;
         this.realm=realm; this.epoch=epoch; this.clock=clock;
+    }
+
+    /** Authenticating read-only gate, including historical completion epochs. No target/writer exists.
+     * Requires externally frozen writers; bounded to 5,000 intents and 10,000 total objects.
+     */
+    public static Summary verifyReadOnly(ErasureObjectStore source, ErasureCipher cipher,
+            CheckpointedErasureLedger.Store checkpoints, String realm, String epoch, Clock clock) {
+        try {
+            var verifier = new ErasureLedgerMigration(source, null, cipher, checkpoints, realm, epoch, clock, true);
+            var before = verifier.capture();
+            var after = verifier.capture();
+            if (!before.head.equals(after.head) || !before.digest.equals(after.digest)) throw unavailable();
+            verifier.requireHead(before.head);
+            return new Summary(before.count, before.count, before.completions, 0, before.digest, false);
+        } catch (Exception ignored) { throw unavailable(); }
     }
 
     /** Default analysis path. No writer is invoked. The digest binds a subsequent approved execution. */

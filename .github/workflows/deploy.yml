@@ -109,7 +109,7 @@ jobs:
             umask 077
             # Read-only preflight must finish BEFORE touching operational configuration.
             test -x /home/luha/erasure-tools/local-ledger-preflight
-            /home/luha/erasure-tools/local-ledger-preflight batch '${{ vars.ERASURE_LEDGER_LOCAL_STORE_ID }}'
+            printf '%s' '${{ steps.lifecycle.outputs.payload }}' | /home/luha/erasure-tools/local-ledger-preflight batch '${{ vars.ERASURE_LEDGER_LOCAL_STORE_ID }}'
             mkdir -p ~/toilet-batch
             cd ~/toilet-batch
             mkdir -p region-results

@@ -15,6 +15,7 @@ test('candidate keeps account actions paused and does not read R2 credentials',(
 })
 test('candidate rejects absent preflight before touching configuration and does not auto-create ledger',()=>{
   const out=renderLocalDeployment(source,role)
+  assert.ok(out.includes("printf '%s' '${{ steps.lifecycle.outputs.payload }}' | /home/luha/erasure-tools/local-ledger-preflight "+role))
   assert.ok(out.indexOf('/home/luha/erasure-tools/local-ledger-preflight '+role)<out.indexOf('mkdir -p ~/toilet-'))
   assert.match(out,/user: "1000:1000"/)
   assert.match(out,/create_host_path: false/)

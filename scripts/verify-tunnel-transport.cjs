@@ -46,7 +46,7 @@ function replaceOnce(before,after) {
 replaceOnce('set -eu\numask 077', 'set -eu\numask 077\n'
  +'# Read-only preflight must finish BEFORE touching operational configuration.\n'
  +'test -x /home/luha/erasure-tools/local-ledger-preflight\n'
- +"/home/luha/erasure-tools/local-ledger-preflight "+role+" '${{ vars.ERASURE_LEDGER_LOCAL_STORE_ID }}'");
+ +"printf '%s' '${{ steps.lifecycle.outputs.payload }}' | /home/luha/erasure-tools/local-ledger-preflight "+role+" '${{ vars.ERASURE_LEDGER_LOCAL_STORE_ID }}'");
 const service=role==='api'?'api':'toilet-batch';
 replaceOnce('  '+service+':','  '+service+':\n    user: "1000:1000"');
 const mount='      - type: bind\n'
