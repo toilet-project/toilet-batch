@@ -112,6 +112,8 @@ class AccountErasureWorkerTest {
     @Test void erasesOnlyIdentityAndPreservesStructuredReport() {
         assertTrue(worker.eraseIfDue(1, now));
         assertEquals(0, jdbc.queryForObject("SELECT COUNT(*) FROM app_user", Integer.class));
+        assertEquals(2, jdbc.queryForObject("SELECT COUNT(*) FROM audit_log", Integer.class));
+        assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM coordinate_revision", Integer.class));
         assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM toilet_report WHERE reporter_user_id IS NULL "
                 + "AND reviewed_by_user_id IS NULL AND proposed_latitude=37.5", Integer.class));
         assertEquals(0, jdbc.queryForObject("SELECT COUNT(*) FROM audit_log WHERE detail_json IS NOT NULL", Integer.class));
@@ -120,6 +122,20 @@ class AccountErasureWorkerTest {
         order.verify(ledger).ensureRecorded(any());
         order.verify(sessions).clear(1);
         assertFalse(worker.eraseIfDue(1, now));
+    }
+
+    @Test void oldBusinessHistoryAndOtherMembersRemainAfterErasure() {
+        member(2, "ACTIVE", now.plusYears(1));
+        jdbc.update("INSERT INTO toilet_report VALUES(22,2,2,'other reason','other review','other key',36.3)");
+        jdbc.update("INSERT INTO audit_log VALUES(2,FALSE,'TOILET_REPORT',22,'other detail')");
+        jdbc.execute("ALTER TABLE toilet_report ADD COLUMN created_at TIMESTAMP DEFAULT TIMESTAMP '2010-01-01 00:00:00'");
+        jdbc.execute("ALTER TABLE audit_log ADD COLUMN created_at TIMESTAMP DEFAULT TIMESTAMP '2010-01-01 00:00:00'");
+        assertTrue(worker.eraseIfDue(1, now));
+        assertEquals(2, jdbc.queryForObject("SELECT COUNT(*) FROM toilet_report WHERE created_at < TIMESTAMP '2020-01-01 00:00:00'", Integer.class));
+        assertEquals(3, jdbc.queryForObject("SELECT COUNT(*) FROM audit_log WHERE created_at < TIMESTAMP '2020-01-01 00:00:00'", Integer.class));
+        assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM toilet_report WHERE report_id=22 AND reporter_user_id=2 AND reviewed_by_user_id=2 AND reason='other reason' AND review_note='other review' AND proposed_latitude=36.3", Integer.class));
+        assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM audit_log WHERE actor_user_id=2 AND target_id=22 AND detail_json='other detail'", Integer.class));
+        assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM app_user WHERE user_id=2 AND status='ACTIVE'", Integer.class));
     }
 
     @Test void pausedDirectWorkerNeverTouchesDatabaseRedisOrLedger() {
