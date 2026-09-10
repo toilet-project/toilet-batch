@@ -1,7 +1,9 @@
 # 대장 종료 활성화 준비표
 
+범위 주의: 여기서 저널·대장 종료는 회원 개인정보 재생 방지 프로토콜의 기록이다. 전체 제보·감사 업무 이력 또는 OS 로그의 기간별 정리는 취소했으며 이 준비표의 조건이 아니다. [회원 탈퇴 파기 범위](account-erasure-scope.md)를 따른다.
+
 기준일 2026-09-10. 운영 활성화 전 구현·검증·배포 준비다.
-완료는 근거 있는 항목만 표시한다. 이번에 운영 DB·컨테이너·계정 기능은 변경하지 않았다.
+완료는 근거 있는 항목만 표시한다. 격리 검증 이후 별도 승인으로 API·배치 준비 배포와 복원 도구 설치를 완료했다. 운영 계정 기능은 비활성을 유지하며 DB·백업·대장 데이터는 변경하지 않았다.
 
 ## 구현·검증
 
@@ -40,7 +42,7 @@ sealing 세부 검사는 로컬 자동검사이며 Linux 프로브가 실제 운
 
 검토용 PR: [API #99](https://github.com/toilet-project/toilet-api/pull/99),
 [배치 #47](https://github.com/toilet-project/toilet-batch/pull/47).
-두 PR은 draft이며 main 병합·운영 배포 승인을 의미하지 않는다.
+두 PR은 별도 승인 후 main에 병합됐다. [API 준비 배포](https://github.com/toilet-project/toilet-api/actions/runs/34408563928), [배치 준비 배포](https://github.com/toilet-project/toilet-batch/actions/runs/34408965446)가 성공했다. 복원 도구도 기존 파일을 보존하여 설치했고 교체 전후 대장 동일성, 공통 잠금 유지와 정기 타이머 재개를 확인했다. 기능 활성화 승인을 의미하지 않는다.
 
 CI 근거: [API 전체 검사](https://github.com/toilet-project/toilet-api/actions/runs/34406441710),
 [배치 전체 검사](https://github.com/toilet-project/toilet-batch/actions/runs/34406732306).
@@ -88,6 +90,12 @@ CI 근거: [API 전체 검사](https://github.com/toilet-project/toilet-api/acti
 - 이력·저널 삭제, 기준 건수 초기화, 원본 복원으로 장애 숨기기 금지.
 - 전체 서버/디스크 유실·악의적 root에 대한 완전한 복구 보장은 제공하지 않음.
 
-전체 CI와 격리 독립 저장소 실접속은 통과했다. 실제 운영 사본 검토 절차와 준비 배포 인수는 남아 있다.
+전체 CI와 격리 독립 저장소 실접속, 준비 배포·복원 도구 설치 인수는 통과했다. 실제 운영 사본 검토 절차와 기능 활성화 인수는 남아 있다.
 이 자료는 운영 활성화 승인서나 법률 검토 완료 증명이 아니다.
 사본 증거의 장기 자동 갱신, 최초 이력 전체 조회 비용, 보류 후보 재처리 순서는 추가 운영 검증이 필요하다.
+
+## 탈퇴 재개와 대장 종료의 경계
+
+API의 AccountLifecycleGate는 maintenance·retention·erasure 설정으로 탈퇴/복구 접근을 제어한다. 실제 파기는 LOCAL 저장 인수·catalogue·독립 checkpoint 보호가 필요하다. 반면 배치 AccountLedgerRetirementJob의 write 설정은 재생 방지 기록의 최종 정리를 별도로 제어한다.
+
+따라서 모든 기존 백업의 부재가 탈퇴 API의 직접적인 선행 조건은 아니다. 백업 복원 방지 보호와 보관 종료 운영 절차를 인수한 뒤 기능을 단계적으로 활성화해야 한다. 사본 종료 증거가 불충분한 상태에서는 대장 종료를 계속 보류한다. 이 구분이 보호 기능이나 고지 검토를 생략해도 된다는 뜻은 아니다.
