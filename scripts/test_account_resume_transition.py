@@ -7,6 +7,8 @@ from pathlib import Path
 import tempfile
 import unittest
 from unittest.mock import patch, Mock
+from datetime import datetime, timezone
+from contextlib import nullcontext
 
 spec = importlib.util.spec_from_file_location('resume', Path(__file__).with_name('account_resume_transition.py'))
 resume = importlib.util.module_from_spec(spec)
@@ -22,6 +24,97 @@ def object_for(phase):
             'Image': 'synthetic:' + COMMIT, 'Env': [k + '=' + v for k, v in env.items()]}}
 
 class TransitionTest(unittest.TestCase):
+    def test_active_check_validates_policy_without_writing_or_restarting(self):
+        for role, states in (('batch', ('guarded', 'guarded')), ('api', ('guarded', 'active'))):
+            objects = dict(zip(('api', 'batch'), map(object_for, states)))
+            for obj in objects.values(): obj['Image'] = 'sha256:synthetic'
+            host = Mock()
+            host.root = Path('/synthetic')
+            host.compose = host.root / 'compose.yml'
+            host.service = role
+            host.context.maintenance_lease.acquire.return_value = nullcontext()
+            host.capture.return_value = objects
+            host.run.side_effect = [json.dumps({'services': {role: {
+                'image': 'synthetic:' + COMMIT, 'user': '1000:1000',
+                'environment': resume.environment(objects[role])}}}), 'sha256:synthetic']
+            content = ''.join(k + "='" + v + "'\n" for k, v in resume.environment(objects[role]).items()).encode()
+            argv = ['resume', '--role', role, '--phase', 'active', '--api-commit', COMMIT,
+                    '--batch-commit', COMMIT, '--policy-version', 'synthetic-v1',
+                    '--policy-announced-at', '2020-01-01T00:00:00Z', '--policy-effective-at', '2020-01-02T00:00:00Z']
+            with patch.object(resume.sys, 'argv', argv), patch.object(resume.sys, 'platform', 'linux'), \
+                 patch.object(resume.os, 'geteuid', return_value=1000, create=True), \
+                 patch.object(resume, 'Host', return_value=host), patch.object(resume, 'read_owned', return_value=content), \
+                 patch.object(resume, 'check_published_policy') as policy, patch.object(resume, 'apply_step') as apply, \
+                 patch('builtins.print'):
+                resume.main()
+            self.assertEqual(policy.call_count, 2)
+            apply.assert_not_called()
+            host.restart.assert_not_called()
+
+    def test_policy_rejection_prevents_even_host_access(self):
+        argv = ['resume', '--role', 'batch', '--phase', 'active', '--api-commit', COMMIT,
+                '--batch-commit', COMMIT, '--policy-version', 'synthetic-v1',
+                '--policy-announced-at', '2020-01-01T00:00:00Z', '--policy-effective-at', '2020-01-02T00:00:00Z',
+                '--apply-approved', '--deployment-freeze-confirmed']
+        with patch.object(resume.sys, 'argv', argv), patch.object(resume.sys, 'platform', 'linux'), \
+             patch.object(resume.os, 'geteuid', return_value=1000, create=True), patch.object(resume, 'Host') as host, \
+             patch.object(resume, 'check_published_policy', side_effect=ValueError('ACCOUNT_RESUME_POLICY_STILL_DRAFT')):
+            with self.assertRaisesRegex(ValueError, 'POLICY_STILL_DRAFT'): resume.main()
+            host.assert_not_called()
+
+    def test_policy_release_rejects_missing_future_invalid_and_reversed_dates(self):
+        now = datetime(2026, 9, 10, tzinfo=timezone.utc)
+        valid = ('synthetic-v1', '2026-09-01T00:00:00Z', '2026-09-08T00:00:00Z')
+        self.assertEqual(resume.policy_expectation(*valid, now)['data-account-policy-status'], 'published')
+        for values in ((None, None, None), ('unsafe;', *valid[1:]),
+                       (valid[0], valid[1], '2026-09-11T00:00:00Z'),
+                       (valid[0], '2026-09-09T00:00:00Z', valid[2]),
+                       (valid[0], valid[1], '2026-02-30T00:00:00Z'),
+                       (valid[0], valid[1], '2026-09-08')):
+            with self.assertRaises(ValueError): resume.policy_expectation(*values, now)
+
+    def test_published_html_requires_one_matching_marker_and_visible_notice(self):
+        expected = resume.policy_expectation('synthetic-v1', '2026-09-01T00:00:00Z', '2026-09-08T00:00:00Z',
+                                             datetime(2026, 9, 10, tzinfo=timezone.utc))
+        attributes = ' '.join(k + '="' + v + '"' for k, v in expected.items())
+        page = '<article ' + attributes + '>공지: 9월 1일 · 시행: 9월 8일</article>'
+        resume.validate_policy_html(page, expected)
+        for bad in ('<h1>Login</h1>', page.replace('published', 'draft'),
+                    page.replace('synthetic-v1', 'other-v1'), page + page,
+                    page.replace('공지:', '알림'), page + '<p>공개 전 확인</p>',
+                    '<script>' + page + '</script>',
+                    page.replace('<article ', '<article data-account-policy-status="published" ')):
+            with self.assertRaises(ValueError): resume.validate_policy_html(bad, expected)
+
+    def test_policy_fetch_fixed_origin_and_both_pages_without_credentials(self):
+        response = Mock(status=200)
+        response.headers.get_content_type.return_value = 'text/html'
+        response.read.return_value = b'synthetic'
+        response.__enter__ = Mock(return_value=response)
+        response.__exit__ = Mock(return_value=False)
+        with patch.object(resume.urllib.request, 'build_opener') as opener, \
+             patch.object(resume, 'validate_policy_html') as validate:
+            opener.return_value.open.return_value = response
+            resume.check_published_policy({'synthetic': True})
+            urls = [call.args[0].full_url for call in opener.return_value.open.call_args_list]
+            self.assertEqual(urls, ['https://geupddong.com/policies/terms', 'https://geupddong.com/policies/privacy'])
+            self.assertEqual(validate.call_count, 2)
+            for call in opener.return_value.open.call_args_list:
+                self.assertNotIn('Authorization', call.args[0].headers)
+                self.assertNotIn('Cookie', call.args[0].headers)
+            response.status = 302
+            with self.assertRaises(ValueError): resume.check_published_policy({})
+
+    def test_active_workflow_requires_pinned_release_and_policy_parameters(self):
+        source = (Path(__file__).parents[1] / '.github/workflows/account-active-transition.yml').read_text()
+        self.assertIn('  workflow_dispatch:', source)
+        self.assertNotRegex(source, r'(?m)^  (push|pull_request|schedule):')
+        for text in ("github.ref == 'refs/heads/main'", 'vars.ACCOUNT_ACTIVE_APPROVED_SHA == github.sha',
+                     '--phase active', '--policy-version', '--policy-announced-at', '--policy-effective-at',
+                     'StrictHostKeyChecking=yes', '--deployment-freeze-confirmed', 'default: check'):
+            self.assertIn(text, source)
+        self.assertNotRegex(source, r'continue-on-error|StrictHostKeyChecking=no|set -x')
+
     def test_manual_workflow_stays_guarded_and_requires_exact_release(self):
         source = (Path(__file__).parents[1] / '.github/workflows/account-guarded-transition.yml').read_text()
         self.assertIn('  workflow_dispatch:', source)
@@ -37,13 +130,14 @@ class TransitionTest(unittest.TestCase):
 
     @unittest.skipUnless(os.name == 'posix', 'bash syntax checked on Linux CI')
     def test_every_workflow_shell_block_parses(self):
-        source = (Path(__file__).parents[1] / '.github/workflows/account-guarded-transition.yml').read_text()
-        blocks = re.findall(r'        run: \|\n((?:          [^\n]*\n|\n)+)', source + '\n')
-        self.assertEqual(len(blocks), 4)
-        for block in blocks:
-            script = '\n'.join(line[10:] for line in block.splitlines())
-            result = subprocess.run(['bash', '-n'], input=script, text=True, capture_output=True)
-            self.assertEqual(result.returncode, 0, result.stderr)
+        for filename in ('account-guarded-transition.yml', 'account-active-transition.yml'):
+            source = (Path(__file__).parents[1] / '.github/workflows' / filename).read_text()
+            blocks = re.findall(r'        run: \|\n((?:          [^\n]*\n|\n)+)', source + '\n')
+            self.assertEqual(len(blocks), 4)
+            for block in blocks:
+                script = '\n'.join(line[10:] for line in block.splitlines())
+                result = subprocess.run(['bash', '-n'], input=script, text=True, capture_output=True)
+                self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_restart_does_not_pull_build_or_recreate_other_services(self):
         for role in ('api', 'batch'):

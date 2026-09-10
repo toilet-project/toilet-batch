@@ -18,6 +18,62 @@ import tempfile
 import time
 import urllib.request
 from datetime import datetime, timezone
+from html.parser import HTMLParser
+
+POLICY_PATHS = ('/policies/terms', '/policies/privacy')
+
+def policy_expectation(version, announced_at, effective_at, now=None):
+    require(re.fullmatch(r'[a-z0-9-]{1,60}', version or '') is not None,
+            'ACCOUNT_RESUME_POLICY_RELEASE_REQUIRED')
+    dates = []
+    for value in (announced_at, effective_at):
+        require(re.fullmatch(r'\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z', value or '') is not None,
+                'ACCOUNT_RESUME_POLICY_RELEASE_REQUIRED')
+        dates.append(datetime.strptime(value, '%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=timezone.utc))
+    require(dates[0] <= dates[1] <= (now or datetime.now(timezone.utc)),
+            'ACCOUNT_RESUME_POLICY_NOT_EFFECTIVE')
+    return {'data-account-policy-status': 'published', 'data-account-policy-version': version,
+            'data-account-policy-announced-at': announced_at, 'data-account-policy-effective-at': effective_at}
+
+def validate_policy_html(body, expected):
+    class PolicyParser(HTMLParser):
+        def __init__(self):
+            super().__init__()
+            self.markers = []
+            self.text = []
+            self.hidden = 0
+        def handle_starttag(self, tag, attrs):
+            if tag in ('script', 'style'): self.hidden += 1
+            if tag == 'article' and any(k == 'data-account-policy-status' for k, _ in attrs):
+                require(len(attrs) == len(dict(attrs)), 'ACCOUNT_RESUME_POLICY_MARKER_REJECTED')
+                self.markers.append(dict(attrs))
+        def handle_endtag(self, tag):
+            if tag in ('script', 'style'): self.hidden = max(0, self.hidden - 1)
+        def handle_data(self, data):
+            if not self.hidden: self.text.append(data)
+    parser = PolicyParser()
+    parser.feed(body)
+    require(len(parser.markers) == 1 and all(parser.markers[0].get(k) == v for k, v in expected.items()),
+            'ACCOUNT_RESUME_POLICY_MARKER_REJECTED')
+    text = ''.join(parser.text)
+    require(not any(word in text for word in ('검토용 개정안', '공개 전 확인', '종료 기준 검토', '아직 시행되지 않은 검토안')),
+            'ACCOUNT_RESUME_POLICY_STILL_DRAFT')
+    require('공지:' in text and '시행:' in text, 'ACCOUNT_RESUME_POLICY_NOTICE_MISSING')
+
+def check_published_policy(expected):
+    # No caller-controlled origin, redirects, proxies, credentials or cookies.
+    class NoRedirect(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, *args, **kwargs):
+            return None
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
+    for path in POLICY_PATHS:
+        request = urllib.request.Request('https://geupddong.com' + path,
+                                        headers={'Cache-Control': 'no-cache', 'User-Agent': 'Geupddong-Policy-Preflight/1.0'})
+        with opener.open(request, timeout=15) as response:
+            require(response.status == 200 and response.headers.get_content_type() == 'text/html')
+            body = response.read(1024 * 1024 + 1)
+        require(len(body) <= 1024 * 1024)
+        validate_policy_html(body.decode('utf-8'), expected)
 
 TRUE_FLAGS = ('ERASURE_LEDGER_ENABLED', 'ERASURE_LEDGER_CATALOGUE_ENABLED',
               'ERASURE_CHECKPOINT_ENABLED', 'ERASURE_LEDGER_LOCAL_ACCEPTANCE_VERIFIED')
@@ -235,10 +291,15 @@ def main():
     parser.add_argument('--batch-commit', required=True)
     parser.add_argument('--apply-approved', action='store_true')
     parser.add_argument('--deployment-freeze-confirmed', action='store_true')
+    parser.add_argument('--policy-version')
+    parser.add_argument('--policy-announced-at')
+    parser.add_argument('--policy-effective-at')
     args = parser.parse_args()
     require(os.geteuid() == 1000 and sys.platform.startswith('linux'))
-    # Active transition requires a later policy-publication release, not a boolean bypass here.
-    require(args.phase == 'guarded', 'ACCOUNT_RESUME_POLICY_RELEASE_REQUIRED')
+    policy = None
+    if args.phase == 'active':
+        policy = policy_expectation(args.policy_version, args.policy_announced_at, args.policy_effective_at)
+        check_published_policy(policy)
     require(not args.apply_approved or args.deployment_freeze_confirmed)
     host = Host(args.role)
     commits = {'api': args.api_commit, 'batch': args.batch_commit}
@@ -259,10 +320,11 @@ def main():
         require(service.get('user') == '1000:1000')
         # Ensure dotenv flags are not silently overridden by the Compose environment section.
         require(all(service['environment'].get(k, 'false' if k in OFF_FLAGS else None) == v
-                    for k, v in flags('paused').items()))
+                    for k, v in flags('guarded' if args.phase == 'active' else 'paused').items()))
         def before():
             require(host.capture() == original_objects)
             require(read_owned(host.compose) == compose and read_owned(host.root / '.env', private=True) == base_env)
+            if policy: check_published_policy(policy)
         def after():
             current = host.capture()
             peer = 'batch' if args.role == 'api' else 'api'
@@ -273,11 +335,13 @@ def main():
             require(phase_of(environment(current[args.role])) == args.phase)
             require(read_owned(host.compose) == compose and read_owned(host.root / '.env', private=True) == base_env)
             host.check_dependencies(current)
+            if policy: check_published_policy(policy)
         before()
         if args.apply_approved:
             apply_step(env_path, original, replacement, before, host.restart, after)
-    print(json.dumps({'outcome': 'GUARDED_CONFIGURATION_APPLIED' if args.apply_approved else 'GUARDED_PREFLIGHT_PASS',
-                      'role': args.role, 'accountActionsEnabled': False, 'retirementEnabled': False,
+    print(json.dumps({'outcome': args.phase.upper() + ('_CONFIGURATION_APPLIED' if args.apply_approved else '_PREFLIGHT_PASS'),
+                      'role': args.role, 'phase': args.phase, 'targetAccountActionsEnabled': args.phase == 'active' and args.apply_approved,
+                      'retirementEnabled': False,
                       'directDatabaseWrites': False, 'applied': args.apply_approved}))
 
 if __name__ == '__main__':
