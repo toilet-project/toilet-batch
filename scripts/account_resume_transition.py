@@ -119,6 +119,14 @@ def environment(obj):
         result[key] = value
     return result
 
+def normalize_inspection(obj):
+    # Docker can reorder this list between reads. Keep every field and duplicate;
+    # only list order is irrelevant. Never omit runtime identity/configuration.
+    require(isinstance(obj.get('Mounts'), list) and all(isinstance(m, dict) for m in obj['Mounts']))
+    result = dict(obj)
+    result['Mounts'] = sorted(obj['Mounts'], key=lambda mount: json.dumps(mount, sort_keys=True))
+    return result
+
 def parse_env(content):
     result = {}
     for line in content.decode('utf-8').splitlines():
@@ -221,7 +229,8 @@ class Host:
                               timeout=timeout, input=input).stdout.strip()
 
     def capture(self):
-        return {role: json.loads(self.run(['docker', 'inspect', 'toilet-' + role]))[0] for role in ('api', 'batch')}
+        return {role: normalize_inspection(json.loads(self.run(['docker', 'inspect', 'toilet-' + role]))[0])
+                for role in ('api', 'batch')}
 
     def compose_command(self, *args):
         return ['docker', 'compose', '--project-directory', str(self.root), '-f', str(self.compose), *args]

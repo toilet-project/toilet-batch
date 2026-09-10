@@ -23,6 +23,62 @@ def object_for(phase):
     return {'State': {'Running': True}, 'Config': {'User': '1000:1000',
             'Image': 'synthetic:' + COMMIT, 'Env': [k + '=' + v for k, v in env.items()]}}
 
+class InspectionOrderTest(unittest.TestCase):
+    def sample(self):
+        return {'Id': 'synthetic-container', 'Image': 'synthetic-image', 'RestartCount': 0,
+                'State': {'Running': True, 'Pid': 123, 'StartedAt': 'synthetic-start'},
+                'Config': {'User': '1000:1000', 'Env': ['SYNTHETIC_FLAG=false']},
+                'Mounts': [{'Type': 'bind', 'Source': '/synthetic/z', 'Destination': '/synthetic/z', 'RW': True},
+                           {'Type': 'bind', 'Source': '/synthetic/a', 'Destination': '/synthetic/a', 'RW': False}]}
+
+    def test_mount_order_is_ignored_without_mutating_input(self):
+        original = self.sample()
+        other = json.loads(json.dumps(original))
+        other['Mounts'].reverse()
+        self.assertEqual(resume.normalize_inspection(original), resume.normalize_inspection(other))
+        self.assertEqual(original['Mounts'][0]['Source'], '/synthetic/z')
+        self.assertEqual(other['Mounts'][0]['Source'], '/synthetic/a')
+
+    def test_real_changes_and_duplicate_mounts_are_not_ignored(self):
+        original = self.sample()
+        variants = []
+        for key, value in (('Source', '/synthetic/changed'), ('Destination', '/synthetic/changed'),
+                           ('Type', 'volume'), ('RW', False)):
+            changed = self.sample()
+            changed['Mounts'][0][key] = value
+            variants.append(changed)
+        for key, value in (('Id', 'recreated'), ('Image', 'new-image'), ('RestartCount', 1)):
+            changed = self.sample()
+            changed[key] = value
+            variants.append(changed)
+        for section, key, value in (('State', 'Pid', 456), ('State', 'Running', False),
+                                    ('State', 'StartedAt', 'restarted'),
+                                    ('Config', 'Env', ['SYNTHETIC_FLAG=true']),
+                                    ('Config', 'User', '0:0')):
+            changed = self.sample()
+            changed[section][key] = value
+            variants.append(changed)
+        changed = self.sample()
+        changed['Mounts'].append(dict(changed['Mounts'][0]))
+        variants.append(changed)
+        for changed in variants:
+            self.assertNotEqual(resume.normalize_inspection(original), resume.normalize_inspection(changed))
+
+    def test_invalid_mount_list_is_rejected(self):
+        for bad in ({}, {'Mounts': None}, {'Mounts': {}}, {'Mounts': ['invalid']}):
+            with self.assertRaises(ValueError):
+                resume.normalize_inspection(bad)
+
+    def test_capture_normalizes_both_services(self):
+        host = object.__new__(resume.Host)
+        original = self.sample()
+        other = self.sample()
+        other['Mounts'].reverse()
+        with patch.object(host, 'run', side_effect=[json.dumps([original]), json.dumps([other])]):
+            captured = host.capture()
+        self.assertEqual(captured['api'], captured['batch'])
+        self.assertEqual(captured['api'], resume.normalize_inspection(original))
+
 class TransitionTest(unittest.TestCase):
     def test_preserving_check_keeps_nonempty_account_queue_and_never_pulls(self):
         from types import SimpleNamespace
