@@ -26,7 +26,10 @@ jobs:
       - name: Preflight guards without production access
         run: python3 -m unittest discover -s scripts -p test_local_ledger_preflight.py
       - name: Require isolated Docker for full regression
-        run: docker info > /dev/null
+        # Includes real Linux atomic replace/fsync/rollback fixtures, with synthetic files only.
+        run: |
+          python3 -B -m unittest discover -s scripts -p test_account_resume_transition.py
+          docker info > /dev/null
       - name: Offline fixtures and package only
         run: |
           chmod +x gradlew
