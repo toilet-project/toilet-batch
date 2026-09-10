@@ -1,4 +1,5 @@
-"""Explicit, one-step configuration transition. Default is read-only; no image build/pull or direct DB mutations.
+"""Explicit one-step transition/rollout. Default is read-only; no image build or direct DB mutations.
+Only an approved preserving rollout may pull its pinned image digest.
 
 Requires the already installed shared maintenance/restore tools. Never install automatically.
 Run only during an approved deployment freeze: existing legacy deploy scripts do not hold
@@ -135,7 +136,7 @@ def candidate(content, runtime, phase):
     return ''.join(k + "='" + v + "'\n" for k, v in values.items()).encode('utf-8')
 
 def validate_step(objects, role, phase, commits):
-    require((role, phase) in STEPS)
+    require(phase == 'preserve' or (role, phase) in STEPS)
     actual = []
     for item_role in ('api', 'batch'):
         obj = objects[item_role]
@@ -147,7 +148,10 @@ def validate_step(objects, role, phase, commits):
         require(env.get('ERASURE_MAINTENANCE_LOCK_ENABLED') == 'true')
         require(env.get('ERASURE_MAINTENANCE_DIRECTORY') == '/home/luha/geupddong-maintenance')
         actual.append(phase_of(env))
-    require(tuple(actual) == STEPS[(role, phase)], 'ACCOUNT_RESUME_STEP_ORDER_REJECTED')
+    if phase == 'preserve':
+        require(actual[0] == actual[1], 'ACCOUNT_RESUME_MIXED_ROLLOUT_REJECTED')
+    else:
+        require(tuple(actual) == STEPS[(role, phase)], 'ACCOUNT_RESUME_STEP_ORDER_REJECTED')
 
 def read_owned(path, private=False):
     require(path.resolve(strict=True) == path)
@@ -175,9 +179,9 @@ def atomic_replace(path, content):
         if os.path.exists(temporary):
             os.unlink(temporary)
 
-def apply_step(path, original, replacement, verify_before, restart, verify_after):
+def apply_step(path, original, replacement, verify_before, restart, verify_after, private=True):
     verify_before()
-    require(read_owned(path, private=True) == original)
+    require(read_owned(path, private=private) == original)
     backup = path.with_name('.account-resume-before-' + str(time.time_ns()) + '.env')
     fd = os.open(backup, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
     with os.fdopen(fd, 'wb') as stream:
@@ -191,6 +195,8 @@ def apply_step(path, original, replacement, verify_before, restart, verify_after
     except Exception:
         try:
             # Configuration rollback only. It cannot restore erased personal information.
+            require(read_owned(path, private=True) == replacement,
+                    'ACCOUNT_RESUME_EXTERNAL_CHANGE_REQUIRES_REVIEW')
             atomic_replace(path, original)
             restart()
         except Exception:
@@ -210,9 +216,9 @@ class Host:
         self.context = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(self.context)
 
-    def run(self, args, env=None, timeout=30):
+    def run(self, args, env=None, timeout=30, input=None):
         return subprocess.run(args, env=env, capture_output=True, text=True, check=True,
-                              timeout=timeout).stdout.strip()
+                              timeout=timeout, input=input).stdout.strip()
 
     def capture(self):
         return {role: json.loads(self.run(['docker', 'inspect', 'toilet-' + role]))[0] for role in ('api', 'batch')}
@@ -220,7 +226,7 @@ class Host:
     def compose_command(self, *args):
         return ['docker', 'compose', '--project-directory', str(self.root), '-f', str(self.compose), *args]
 
-    def check_dependencies(self, objects):
+    def check_dependencies(self, objects, initial_transition=True):
         values = {role: environment(item) for role, item in objects.items()}
         epoch = values['api']['ERASURE_CHECKPOINT_DATABASE_EPOCH']
         self.context.select({'toilet-' + k: v for k, v in objects.items()}, epoch)
@@ -234,7 +240,9 @@ class Host:
         raw = self.run(['docker', 'exec', '-e', 'MYSQL_PWD', 'toilet-mysql', 'mysql', '-u',
                         api['SPRING_DB_USERNAME'], '--database=toilet_db', '--batch', '--skip-column-names', '-e', SQL],
                        dict(os.environ, MYSQL_PWD=api['SPRING_DB_PASSWORD']))
-        require(raw == '0', 'ACCOUNT_RESUME_EXISTING_QUEUE_REQUIRES_REVIEW')
+        require(raw.isascii() and raw.isdigit())
+        if initial_transition:
+            require(raw == '0', 'ACCOUNT_RESUME_EXISTING_QUEUE_REQUIRES_REVIEW')
         require(self.run(['docker', 'exec', '-e', 'REDISCLI_AUTH', 'toilet-redis', 'redis-cli', 'PING'],
                          dict(os.environ, REDISCLI_AUTH=api['REDIS_PASSWORD'])) == 'PONG')
         records = []
@@ -244,9 +252,11 @@ class Host:
         checked = datetime.fromisoformat(latest['checkedAt'].replace('Z', '+00:00'))
         require(checked.tzinfo is not None and 0 <= (datetime.now(timezone.utc) - checked).total_seconds() <= 86400)
         snapshot, _ = self.context.snapshot(epoch)
-        require(all(snapshot.get(k) == v for k, v in latest['ledgerSnapshot'].items()))
+        if initial_transition:
+            require(all(snapshot.get(k) == v for k, v in latest['ledgerSnapshot'].items()))
         require(snapshot.get('stableSnapshot') is True and snapshot.get('ledgerWrites') is False
                 and snapshot.get('checkpointWrites') is False)
+        return {k: v for k, v in snapshot.items() if k != 'verifiedAt'}
 
     def healthy(self, obj):
         env = environment(obj)
@@ -283,10 +293,80 @@ class Host:
                     raise ValueError('ACCOUNT_RESUME_HEALTH_UNVERIFIED') from None
                 time.sleep(2)
 
+def image_only_compose(content, old_image, next_commit):
+    require(re.fullmatch(r'[a-f0-9]{40}', next_commit or '') is not None)
+    repository, old_commit = old_image.rsplit(':', 1)
+    require(re.fullmatch(r'[a-f0-9]{40}', old_commit) is not None and old_commit != next_commit)
+    new_image = repository + ':' + next_commit
+    pattern = re.compile(r'(?m)^(\s*image: )' + re.escape(old_image) + r'(\s*)$')
+    text, count = pattern.subn(lambda match: match[1] + new_image + match[2], content.decode('utf-8'))
+    require(count == 1, 'ACCOUNT_RESUME_COMPOSE_IMAGE_REJECTED')
+    return text.encode('utf-8'), new_image
+
+def validate_image_only_render(original, replacement, service, image):
+    expected = json.loads(json.dumps(original))
+    expected['services'][service]['image'] = image
+    require(replacement == expected, 'ACCOUNT_RESUME_NON_IMAGE_CHANGE_REJECTED')
+
+def preserve_rollout(args):
+    require(re.fullmatch(r'sha256:[a-f0-9]{64}', args.next_image_digest or '') is not None)
+    require(not args.apply_approved or (args.deployment_freeze_confirmed and args.schema_compatible_confirmed))
+    host = Host(args.role)
+    commits = {'api': args.api_commit, 'batch': args.batch_commit}
+    with host.context.maintenance_lease.acquire():
+        original_objects = host.capture()
+        validate_step(original_objects, args.role, 'preserve', commits)
+        initial_phase = phase_of(environment(original_objects[args.role]))
+        ledger = host.check_dependencies(original_objects, initial_transition=False)
+        original = read_owned(host.compose)
+        base_env = read_owned(host.root / '.env', private=True)
+        account_env = read_owned(host.root / '.account-lifecycle.env', private=True)
+        old_image = original_objects[args.role]['Config']['Image']
+        replacement, new_image = image_only_compose(original, old_image, args.next_commit)
+        rendered = json.loads(host.run(host.compose_command('config', '--format', 'json')))
+        require(rendered['services'][host.service]['image'] == old_image)
+        require(rendered['services'][host.service].get('user') == '1000:1000')
+        candidate_render = json.loads(host.run(['docker', 'compose', '--project-directory', str(host.root),
+                                               '-f', '-', 'config', '--format', 'json'],
+                                              input=replacement.decode('utf-8')))
+        validate_image_only_render(rendered, candidate_render, host.service, new_image)
+        # Artifact must already be built and approved. Read-only check never pulls images.
+        pinned = new_image.rsplit(':', 1)[0] + '@' + args.next_image_digest
+        if args.apply_approved:
+            host.run(['docker', 'pull', pinned], timeout=180)
+            host.run(['docker', 'tag', pinned, new_image])
+        image = json.loads(host.run(['docker', 'image', 'inspect', new_image]))[0]
+        require(pinned in image.get('RepoDigests', []), 'ACCOUNT_RESUME_IMAGE_DIGEST_REJECTED')
+        expected_id = image['Id']
+        def before():
+            require(host.capture() == original_objects)
+            require(read_owned(host.root / '.env', private=True) == base_env)
+            require(read_owned(host.root / '.account-lifecycle.env', private=True) == account_env)
+            require(host.run(['docker', 'image', 'inspect', '--format', '{{.Id}}', new_image]) == expected_id)
+            require(host.run(['docker', 'image', 'inspect', '--format', '{{.Id}}', old_image])
+                    == original_objects[args.role]['Image'], 'ACCOUNT_RESUME_ROLLBACK_IMAGE_UNVERIFIED')
+        def after():
+            current = host.capture()
+            peer = 'batch' if args.role == 'api' else 'api'
+            require(current[peer] == original_objects[peer])
+            require(current[args.role]['Image'] == expected_id)
+            require(read_owned(host.compose) == replacement)
+            require(environment(current[args.role]) == environment(original_objects[args.role]))
+            require(phase_of(environment(current[args.role])) == initial_phase)
+            require(read_owned(host.root / '.env', private=True) == base_env)
+            require(read_owned(host.root / '.account-lifecycle.env', private=True) == account_env)
+            require(host.check_dependencies(current, initial_transition=False) == ledger)
+        before()
+        if args.apply_approved:
+            apply_step(host.compose, original, replacement, before, host.restart, after, private=False)
+    print(json.dumps({'outcome': 'PRESERVING_ROLLOUT_APPLIED' if args.apply_approved else 'PRESERVING_ROLLOUT_PREFLIGHT_PASS',
+                      'role': args.role, 'preservedPhase': initial_phase, 'applied': args.apply_approved,
+                      'accountConfigurationChanged': False, 'directDatabaseWrites': False}))
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--role', required=True, choices=('api', 'batch'))
-    parser.add_argument('--phase', required=True, choices=('guarded', 'active'))
+    parser.add_argument('--phase', required=True, choices=('guarded', 'active', 'preserve'))
     parser.add_argument('--api-commit', required=True)
     parser.add_argument('--batch-commit', required=True)
     parser.add_argument('--apply-approved', action='store_true')
@@ -294,8 +374,14 @@ def main():
     parser.add_argument('--policy-version')
     parser.add_argument('--policy-announced-at')
     parser.add_argument('--policy-effective-at')
+    parser.add_argument('--next-commit')
+    parser.add_argument('--next-image-digest')
+    parser.add_argument('--schema-compatible-confirmed', action='store_true')
     args = parser.parse_args()
     require(os.geteuid() == 1000 and sys.platform.startswith('linux'))
+    if args.phase == 'preserve':
+        preserve_rollout(args)
+        return
     policy = None
     if args.phase == 'active':
         policy = policy_expectation(args.policy_version, args.policy_announced_at, args.policy_effective_at)

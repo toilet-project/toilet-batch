@@ -24,6 +24,80 @@ def object_for(phase):
             'Image': 'synthetic:' + COMMIT, 'Env': [k + '=' + v for k, v in env.items()]}}
 
 class TransitionTest(unittest.TestCase):
+    def test_preserving_check_keeps_nonempty_account_queue_and_never_pulls(self):
+        from types import SimpleNamespace
+        objects = {'api': object_for('active'), 'batch': object_for('active')}
+        objects['api']['Image'] = 'old-image-id'
+        old = 'synthetic:' + COMMIT
+        source = ('services:\n  api:\n    image: ' + old + '\n').encode()
+        new_image = 'synthetic:' + 'b' * 40
+        rendered = {'services': {'api': {'image': old, 'user': '1000:1000'}}}
+        replacement = {'services': {'api': {'image': new_image, 'user': '1000:1000'}}}
+        host = Mock(root=Path('/synthetic'), compose=Path('/synthetic/compose.yml'), service='api')
+        host.compose_command.side_effect = lambda *args: ['docker', 'compose', *args]
+        host.context.maintenance_lease.acquire.return_value = nullcontext()
+        host.capture.return_value = objects
+        host.check_dependencies.return_value = {'records': 3}
+        host.run.side_effect = [json.dumps(rendered), json.dumps(replacement),
+                               json.dumps([{'RepoDigests': ['synthetic@sha256:' + 'c' * 64], 'Id': 'image-id'}]), 'image-id', 'old-image-id']
+        args = SimpleNamespace(role='api', api_commit=COMMIT, batch_commit=COMMIT, next_commit='b' * 40,
+                               next_image_digest='sha256:' + 'c' * 64, apply_approved=False)
+        with patch.object(resume, 'Host', return_value=host), patch.object(resume, 'read_owned', return_value=source), \
+             patch.object(resume, 'apply_step') as apply, patch('builtins.print'):
+            resume.preserve_rollout(args)
+        host.check_dependencies.assert_called_once_with(objects, initial_transition=False)
+        apply.assert_not_called()
+        host.restart.assert_not_called()
+        self.assertFalse(any(call.args[0][:2] == ['docker', 'pull'] for call in host.run.call_args_list))
+
+    def test_preserve_rollout_accepts_only_matching_existing_phases(self):
+        for phase in ('paused', 'guarded', 'active'):
+            objects = dict.fromkeys(('api', 'batch'), object_for(phase))
+            resume.validate_step(objects, 'api', 'preserve', dict.fromkeys(('api', 'batch'), COMMIT))
+        with self.assertRaisesRegex(ValueError, 'MIXED_ROLLOUT'):
+            resume.validate_step({'api': object_for('guarded'), 'batch': object_for('active')},
+                                 'api', 'preserve', dict.fromkeys(('api', 'batch'), COMMIT))
+
+    def test_preserving_compose_changes_one_image_only(self):
+        old = 'synthetic/toilet-api:' + COMMIT
+        source = ('services:\n  api:\n    image: ' + old +
+                  '\n    env_file: [.env, .account-lifecycle.env]\n  redis:\n    image: redis:7\n').encode()
+        changed, image = resume.image_only_compose(source, old, 'b' * 40)
+        self.assertEqual(changed, source.replace(old.encode(), image.encode()))
+        original = {'services': {'api': {'image': old, 'environment': resume.flags('active')},
+                                 'redis': {'image': 'redis:7'}}}
+        expected = json.loads(json.dumps(original))
+        expected['services']['api']['image'] = image
+        resume.validate_image_only_render(original, expected, 'api', image)
+        expected['services']['api']['environment']['ACCOUNT_RETENTION_ENABLED'] = 'false'
+        with self.assertRaises(ValueError):
+            resume.validate_image_only_render(original, expected, 'api', image)
+        for content, commit in ((source + source, 'b' * 40), (b'services: {}', 'b' * 40),
+                                (source, COMMIT), (source, 'invalid;')):
+            with self.assertRaises(ValueError): resume.image_only_compose(content, old, commit)
+
+    def test_rollout_requires_digest_and_schema_approval_before_host_access(self):
+        from types import SimpleNamespace
+        args = SimpleNamespace(next_image_digest='invalid', apply_approved=False,
+                               deployment_freeze_confirmed=False, schema_compatible_confirmed=False)
+        with patch.object(resume, 'Host') as host:
+            with self.assertRaises(ValueError): resume.preserve_rollout(args)
+            args.next_image_digest = 'sha256:' + 'a' * 64
+            args.apply_approved = True
+            args.deployment_freeze_confirmed = True
+            with self.assertRaises(ValueError): resume.preserve_rollout(args)
+            host.assert_not_called()
+
+    def test_preserving_workflow_pins_artifact_without_enabling_accounts(self):
+        source = (Path(__file__).parents[1] / '.github/workflows/account-preserving-rollout.yml').read_text()
+        for text in ('workflow_dispatch:', "github.ref == 'refs/heads/main'",
+                     'vars.ACCOUNT_ROLLOUT_APPROVED_SHA == github.sha', 'default: check',
+                     '--phase preserve', '--next-image-digest', '--schema-compatible-confirmed'):
+            self.assertIn(text, source)
+        self.assertNotRegex(source, r'(?m)^  (push|pull_request|schedule):')
+        self.assertNotIn('--phase active', source)
+        self.assertNotIn('ACCOUNT_ERASURE_ENABLED:', source)
+
     def test_active_check_validates_policy_without_writing_or_restarting(self):
         for role, states in (('batch', ('guarded', 'guarded')), ('api', ('guarded', 'active'))):
             objects = dict(zip(('api', 'batch'), map(object_for, states)))
@@ -130,7 +204,7 @@ class TransitionTest(unittest.TestCase):
 
     @unittest.skipUnless(os.name == 'posix', 'bash syntax checked on Linux CI')
     def test_every_workflow_shell_block_parses(self):
-        for filename in ('account-guarded-transition.yml', 'account-active-transition.yml'):
+        for filename in ('account-guarded-transition.yml', 'account-active-transition.yml', 'account-preserving-rollout.yml'):
             source = (Path(__file__).parents[1] / '.github/workflows' / filename).read_text()
             blocks = re.findall(r'        run: \|\n((?:          [^\n]*\n|\n)+)', source + '\n')
             self.assertEqual(len(blocks), 4)
@@ -249,6 +323,16 @@ class TransitionTest(unittest.TestCase):
 
 @unittest.skipUnless(os.name == 'posix', 'real atomic replace/fsync fixture runs on Linux CI')
 class AtomicTransitionTest(unittest.TestCase):
+    def test_external_change_is_not_overwritten_by_rollback(self):
+        restart = Mock()
+        def drift():
+            self.target.write_bytes(b'external-change')
+            raise ValueError('synthetic drift')
+        with self.assertRaisesRegex(RuntimeError, 'ROLLBACK_UNVERIFIED'):
+            resume.apply_step(self.target, self.original, self.changed, lambda: None, restart, drift)
+        self.assertEqual(self.target.read_bytes(), b'external-change')
+        self.assertEqual(restart.call_count, 1)
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)
