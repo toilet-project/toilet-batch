@@ -50,20 +50,37 @@ public class BatchFailureNotifier {
         send(content);
     }
 
-    private void send(String content) {
+    public boolean notifyCheckpointTokenExpiry(String level) {
+        String description = switch (level) {
+            case "UNKNOWN" -> "만료 정보 확인 실패";
+            case "EXPIRED" -> "만료됨";
+            case "DAY_1" -> "만료 1일 이내";
+            case "DAY_7" -> "만료 7일 이내";
+            case "DAY_14" -> "만료 14일 이내";
+            case "DAY_30" -> "만료 30일 이내";
+            default -> throw new IllegalArgumentException("EXPIRY_LEVEL_INVALID");
+        };
+        return send("[급똥] 독립 검증 GitHub 토큰: " + description
+                + "\n- 조치: 전용 토큰 상태와 교체 일정을 확인하세요.");
+    }
+
+    private boolean send(String content) {
         if (!notificationProperties.enabled()) {
             log.warn("Batch notification webhook is not configured");
-            return;
+            return false;
         }
         try {
             restClient.post()
                     .uri(notificationProperties.webhookUrl())
-                    .body(Map.of("content", content))
+                    .header("User-Agent", "DiscordBot (https://geupddong.com, 1.0)")
+                    .body(Map.of("content", content, "allowed_mentions", Map.of("parse", java.util.List.of())))
                     .retrieve()
                     .toBodilessEntity();
+            return true;
         } catch (RuntimeException notificationException) {
             log.error("배치 실패 Webhook 전송에도 실패했습니다. errorType={}",
                     notificationException.getClass().getSimpleName());
+            return false;
         }
     }
 }
