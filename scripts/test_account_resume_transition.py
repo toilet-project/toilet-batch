@@ -24,6 +24,17 @@ def object_for(phase):
             'Image': 'synthetic:' + COMMIT, 'Env': [k + '=' + v for k, v in env.items()]}}
 
 class InspectionOrderTest(unittest.TestCase):
+    def test_image_build_is_pinned_manual_and_has_no_server_access(self):
+        source = (Path(__file__).parents[1] / '.github/workflows/account-image-build.yml').read_text()
+        for text in ('workflow_dispatch:', "github.ref == 'refs/heads/main'",
+                     'vars.ACCOUNT_IMAGE_BUILD_APPROVED_SHA == github.sha',
+                     'inputs.expected_commit == github.sha', 'deploymentPerformed', 'accountStateChanged'):
+            self.assertIn(text, source)
+        self.assertNotRegex(source, r'(?m)^  (push|pull_request|schedule):')
+        for prohibited in ('MINI_PC_KEY', 'TUNNEL_', 'REDIS_PASSWORD', 'SPRING_DB_',
+                           'ERASURE_LEDGER_KEYS_JSON', ':latest', 'docker compose', '--apply-approved'):
+            self.assertNotIn(prohibited, source)
+
     def sample(self):
         return {'Id': 'synthetic-container', 'Image': 'synthetic-image', 'RestartCount': 0,
                 'State': {'Running': True, 'Pid': 123, 'StartedAt': 'synthetic-start'},

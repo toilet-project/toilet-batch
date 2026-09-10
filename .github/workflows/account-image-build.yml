@@ -1,0 +1,78 @@
+name: Build approved account service image
+on:
+  workflow_dispatch:
+    inputs:
+      expected_commit:
+        description: Approved main source commit (40 hex)
+        type: string
+        required: true
+permissions:
+  contents: read
+concurrency:
+  group: toilet-batch-image-build
+  cancel-in-progress: false
+jobs:
+  build:
+    if: >-
+      github.repository == 'toilet-project/toilet-batch' &&
+      github.ref == 'refs/heads/main' &&
+      vars.ACCOUNT_IMAGE_BUILD_APPROVED == 'true' &&
+      vars.ACCOUNT_IMAGE_BUILD_APPROVED_SHA == github.sha &&
+      inputs.expected_commit == github.sha
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Validate pinned source
+        env:
+          EXPECTED_COMMIT: ${{ inputs.expected_commit }}
+        run: |
+          set -euo pipefail
+          [[ "$EXPECTED_COMMIT" =~ ^[a-f0-9]{40}$ ]]
+          test "$EXPECTED_COMMIT" = "$GITHUB_SHA"
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Verify isolated tests and build image input
+        run: |
+          set -euo pipefail
+          docker info > /dev/null
+          python3 -B -m unittest discover -s scripts -p test_account_resume_transition.py
+          chmod +x gradlew
+          ./gradlew clean test bootJar --no-daemon --console=plain
+      - uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: Publish commit-tagged image only
+        id: image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/toilet-batch:${{ github.sha }}
+      - name: Record non-secret build receipt
+        env:
+          IMAGE_DIGEST: ${{ steps.image.outputs.digest }}
+        run: |
+          python3 - <<'PY'
+          import json, os, re
+          from pathlib import Path
+          digest = os.environ['IMAGE_DIGEST']
+          commit = os.environ['GITHUB_SHA']
+          assert re.fullmatch(r'sha256:[a-f0-9]{64}', digest)
+          assert re.fullmatch(r'[a-f0-9]{40}', commit)
+          Path('account-image-receipt.json').write_text(json.dumps({
+              'commit': commit, 'digest': digest, 'service': 'toilet-batch',
+              'deploymentPerformed': False, 'accountStateChanged': False
+          }) + '\n')
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: account-image-receipt-${{ github.sha }}
+          path: account-image-receipt.json
+          retention-days: 30
