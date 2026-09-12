@@ -15,6 +15,8 @@ assert.deepEqual(Object.keys(oldJobs),Object.keys(newJobs));
 const key=Object.keys(oldJobs)[0];
 const {steps:oldSteps,...oldJob}=oldJobs[key];
 const {steps:newSteps,...newJob}=newJobs[key];
+assert.equal(newJob.if,"github.repository == 'toilet-project/toilet-batch' && vars.ACCOUNT_LIFECYCLE_DEPLOYMENT_APPROVED == 'true' && vars.ACCOUNT_LIFECYCLE_DEPLOYMENT_APPROVED_SHA == github.sha",'Exact commit deploy gate required');
+delete newJob.if;
 assert.deepEqual(oldJob,newJob);
 const i=oldSteps.findIndex(s=>s.uses?.startsWith('appleboy/ssh-action@'));
 assert.equal(i,oldSteps.length-1);

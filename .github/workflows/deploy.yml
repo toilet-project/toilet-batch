@@ -14,6 +14,10 @@ concurrency:
 
 jobs:
   build-and-deploy:
+    if: >-
+      github.repository == 'toilet-project/toilet-batch' &&
+      vars.ACCOUNT_LIFECYCLE_DEPLOYMENT_APPROVED == 'true' &&
+      vars.ACCOUNT_LIFECYCLE_DEPLOYMENT_APPROVED_SHA == github.sha
     runs-on: ubuntu-latest
 
     steps:

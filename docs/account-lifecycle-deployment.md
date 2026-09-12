@@ -1,7 +1,7 @@
 # Account erasure deployment preparation
 
 Production activation is not authorized. The workflow requires repository variable
-`ACCOUNT_LIFECYCLE_DEPLOYMENT_APPROVED=true` before building/pushing an image or connecting to the host.
+`ACCOUNT_LIFECYCLE_DEPLOYMENT_APPROVED=true` and an exact `ACCOUNT_LIFECYCLE_DEPLOYMENT_APPROVED_SHA` match are required before building/pushing an image or connecting to the host.
 The current preflight forces maintenance true and retention/erasure/ledger/catalogue false; it rejects activation.
 
 - `ACCOUNT_LIFECYCLE_MAINTENANCE=true` suppresses the scheduled post-sync job AND rejects direct worker erasure before DB/Redis/R2 access.
