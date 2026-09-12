@@ -1,4 +1,4 @@
-# 리뷰 작성자 연결 해제 복원 보호 — 개발 4주차(2026-09-07~09-13)
+# 리뷰 작성자 연결 해제 대장·복원 보호 — 개발 4주차(2026-09-07~09-13)
 
 2026-09-12 배포 전 후보. 이 문서는 운영 실행 승인이나 데이터 삭제 승인이 아니다.
 
@@ -35,7 +35,7 @@ flowchart LR
 
 1. 회원 파기 대장과 분리된 Linux 로컬 디렉터리·marker·lock과 새 store ID를 만든다.
 2. 독립 저장소의 전용 orphan 브랜치에 같은 DB epoch, realm `review-anonymization`, 0건 inventory로 서명되지 않은 집계 genesis를 만든다.
-3. 현재 서버에 별도로 보관한 키로 두 목록과 genesis를 읽는 사전 검사를 통과시킨다.
+3. `ReviewUnlinkLedgerPreflightCli --read-only`로 두 목록과 genesis를 읽는 사전 검사를 통과시킨다. 이 명령은 DB·Redis에 연결하거나 파일·checkpoint를 쓰지 않으며 성공해도 활성화를 허용하지 않는다.
 4. GitHub Actions의 일회용 MySQL 8에서 가상 V12 백업을 복원해 dry-run → 회원 파기 적용 → 리뷰 연결 해제 적용 → 반복 적용 0건 → 행 수 보존을 확인한다. 운영 미니 PC에서는 이 복원 컨테이너를 실행하지 않는다.
 5. 위 결과와 정확한 이미지/도구 해시를 남긴 뒤에만 API의 리뷰 작성자 연결 해제 플래그를 활성화한다.
 
