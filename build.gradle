@@ -69,6 +69,16 @@ tasks.register('accountErasureRestore', JavaExec) {
     mainClass = 'com.example.toiletbatch.account.AccountErasureRestoreCli'
 }
 
+tasks.register('reviewUnlinkRestore', JavaExec) {
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'com.example.toiletbatch.account.ReviewUnlinkRestoreCli'
+}
+
+tasks.register('reviewUnlinkLedgerPreflight', JavaExec) {
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'com.example.toiletbatch.account.ReviewUnlinkLedgerPreflightCli'
+}
+
 // Standalone CLI classpath; no application server, scheduler, DB or Redis auto-configuration.
 tasks.register('installErasureTools', Sync) {
     dependsOn tasks.named('jar')

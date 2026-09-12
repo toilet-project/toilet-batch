@@ -9,6 +9,12 @@ export function renderLocalDeployment(source, role) {
     if (text.split(a).length !== 2) throw Error('DEPLOYMENT_BASE_DRIFT')
     text=text.replace(a,b)
   }
+  replace('  build-and-deploy:\n    runs-on: ubuntu-latest', `  build-and-deploy:
+    if: >-
+      github.repository == 'toilet-project/toilet-batch' &&
+      vars.ACCOUNT_LIFECYCLE_DEPLOYMENT_APPROVED == 'true' &&
+      vars.ACCOUNT_LIFECYCLE_DEPLOYMENT_APPROVED_SHA == github.sha
+    runs-on: ubuntu-latest`)
   replace("          ERASURE_LEDGER_DEPLOYMENT_PROFILE: 'us-runtime'",
     `          ERASURE_LEDGER_DEPLOYMENT_PROFILE: 'local-paused'
           ERASURE_LEDGER_PROVIDER: 'LOCAL'
