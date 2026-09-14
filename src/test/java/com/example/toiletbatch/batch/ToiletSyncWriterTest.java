@@ -62,7 +62,8 @@ class ToiletSyncWriterTest {
                 open_time VARCHAR(50), open_time_detail VARCHAR(255), installation_date VARCHAR(20), ownership_type VARCHAR(50),
                 has_emergency_bell VARCHAR(10), emergency_bell_location VARCHAR(100), has_cctv VARCHAR(10),
                 has_diaper_table VARCHAR(10), diaper_table_location VARCHAR(100), data_base_date VARCHAR(20),
-                coordinate_source VARCHAR(30), geocoded_address_hash CHAR(64), geocoded_at TIMESTAMP, data_source VARCHAR(20))
+                coordinate_source VARCHAR(30), geocoded_address_hash CHAR(64), geocoded_at TIMESTAMP,
+                data_source VARCHAR(20), region_revision BIGINT NOT NULL DEFAULT 1)
                 """);
         db.update("INSERT INTO toilet(mng_no,latitude,longitude,coordinate_source) VALUES('A',37.5,127.5,'ADMIN_CONFIRMED'),('B',NULL,NULL,'LEGACY')");
         db.update("UPDATE toilet SET road_address=NULL,jibun_address='관리자 확정 지번' WHERE mng_no='A'");
@@ -75,5 +76,7 @@ class ToiletSyncWriterTest {
         assertEquals("도로명", db.queryForObject("SELECT road_address FROM toilet WHERE mng_no='B'", String.class));
         assertEquals("지번", db.queryForObject("SELECT jibun_address FROM toilet WHERE mng_no='B'", String.class));
         assertEquals(new BigDecimal("36.3500000"), db.queryForObject("SELECT latitude FROM toilet WHERE mng_no='B'", BigDecimal.class));
+        assertEquals(1L, db.queryForObject("SELECT region_revision FROM toilet WHERE mng_no='A'", Long.class));
+        assertEquals(3L, db.queryForObject("SELECT region_revision FROM toilet WHERE mng_no='B'", Long.class));
     }
 }
