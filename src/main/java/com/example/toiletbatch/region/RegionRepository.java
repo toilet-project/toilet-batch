@@ -93,12 +93,12 @@ public final class RegionRepository {
                     c.rollback(); return new Applied(true, false, result);
                 }
                 // Keep the input snapshot before optional missing-coordinate filling changes its hash.
-                saveHistory(c, result);
+                long assessmentId = saveHistory(c, result);
                 boolean filled = fillMissing && current.latitude() == null && current.longitude() == null
                         && result.status() == Status.VERIFIED && result.evaluated() != null && result.evaluated().valid()
                         && !"NONE".equals(result.fallback());
                 if (filled) {
-                    try (var s = c.prepareStatement("UPDATE toilet SET latitude=?, longitude=?, coordinate_source=?, geocoded_at=? WHERE toilet_id=? AND latitude IS NULL AND longitude IS NULL")) {
+                    try (var s = c.prepareStatement("UPDATE toilet SET latitude=?, longitude=?, coordinate_source=?, geocoded_at=?, region_revision=region_revision+1 WHERE toilet_id=? AND latitude IS NULL AND longitude IS NULL")) {
                         s.setBigDecimal(1, result.evaluated().latitude()); s.setBigDecimal(2, result.evaluated().longitude());
                         s.setString(3, "GEOCODED_" + result.fallback());
                         s.setObject(4, LocalDateTime.ofInstant(Instant.ofEpochMilli(result.checkedEpochMillis()), ZoneId.of("Asia/Seoul")));
@@ -108,6 +108,7 @@ public final class RegionRepository {
                     result = result.withSource(current.withPoint(result.evaluated()));
                 }
                 save(c, result);
+                saveAssignment(c, result, assessmentId);
                 c.commit(); return new Applied(false, filled, result);
             } catch (Exception e) { c.rollback(); throw e; }
             finally { c.setAutoCommit(auto); }
@@ -131,7 +132,7 @@ public final class RegionRepository {
             s.executeUpdate();
         }
     }
-    private void saveHistory(Connection c, Result r) throws Exception {
+    private long saveHistory(Connection c, Result r) throws Exception {
         try (var s = c.prepareStatement("""
                 INSERT INTO toilet_region_assessment_history
                 (toilet_id,source_hash,algorithm_version,status,reason,result_json,checked_epoch_millis,checked_at)
@@ -142,6 +143,56 @@ public final class RegionRepository {
             s.setString(3, r.algorithmVersion()); s.setString(4, r.status().name()); s.setString(5, r.reason());
             s.setString(6, json.writeValueAsString(r)); s.setLong(7, r.checkedEpochMillis());
             s.setObject(8, LocalDateTime.ofInstant(Instant.ofEpochMilli(r.checkedEpochMillis()), ZoneId.of("Asia/Seoul")));
+            s.executeUpdate();
+        }
+        try (var s = c.prepareStatement("""
+                SELECT assessment_id FROM toilet_region_assessment_history
+                WHERE toilet_id=? AND source_hash=? AND algorithm_version=? AND checked_epoch_millis=?
+                """)) {
+            s.setLong(1, r.source().toiletId()); s.setString(2, r.source().hash());
+            s.setString(3, r.algorithmVersion()); s.setLong(4, r.checkedEpochMillis());
+            try (var rs = s.executeQuery()) {
+                if (!rs.next()) throw new SQLException("Saved region assessment was not found");
+                return rs.getLong(1);
+            }
+        }
+    }
+
+    private void saveAssignment(Connection c, Result r, long assessmentId) throws Exception {
+        long sourceRevision;
+        try (var s = c.prepareStatement("SELECT region_revision FROM toilet WHERE toilet_id=?")) {
+            s.setLong(1, r.source().toiletId());
+            try (var rs = s.executeQuery()) {
+                if (!rs.next()) throw new SQLException("Toilet disappeared while saving region assignment");
+                sourceRevision = rs.getLong(1);
+            }
+        }
+        Region region = r.region();
+        try (var s = c.prepareStatement("""
+                INSERT INTO toilet_region_assignment
+                    (toilet_id,sigungu_code,legal_dong_code,administrative_dong_code,region_source,
+                     status,reason,source_hash,source_revision,evaluated_latitude,evaluated_longitude,
+                     assessment_id,checked_at)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+                ON DUPLICATE KEY UPDATE sigungu_code=VALUES(sigungu_code),legal_dong_code=VALUES(legal_dong_code),
+                    administrative_dong_code=VALUES(administrative_dong_code),region_source=VALUES(region_source),
+                    status=VALUES(status),reason=VALUES(reason),source_hash=VALUES(source_hash),
+                    source_revision=VALUES(source_revision),evaluated_latitude=VALUES(evaluated_latitude),
+                    evaluated_longitude=VALUES(evaluated_longitude),assessment_id=VALUES(assessment_id),
+                    checked_at=VALUES(checked_at)
+                """)) {
+            int index = 1;
+            s.setLong(index++, r.source().toiletId());
+            s.setString(index++, region == null ? null : region.sigunguCode());
+            s.setString(index++, region == null ? null : region.legalDongCode());
+            s.setString(index++, region == null ? null : region.administrativeDongCode());
+            s.setString(index++, "KAKAO_COORD2REGIONCODE_B");
+            s.setString(index++, r.status().name()); s.setString(index++, r.reason());
+            s.setString(index++, r.source().hash()); s.setLong(index++, sourceRevision);
+            s.setBigDecimal(index++, r.evaluated() == null ? null : r.evaluated().latitude());
+            s.setBigDecimal(index++, r.evaluated() == null ? null : r.evaluated().longitude());
+            s.setLong(index++, assessmentId);
+            s.setObject(index, LocalDateTime.ofInstant(Instant.ofEpochMilli(r.checkedEpochMillis()), ZoneId.of("Asia/Seoul")));
             s.executeUpdate();
         }
     }

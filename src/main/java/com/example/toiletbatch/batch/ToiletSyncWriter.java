@@ -12,6 +12,11 @@ public class ToiletSyncWriter {
     private static final String UPDATE_SQL = """
             UPDATE toilet
                SET name = ?, toilet_type = ?,
+                   region_revision = region_revision + CASE
+                       WHEN coordinate_source = 'ADMIN_CONFIRMED' THEN 0
+                       WHEN (road_address = ? OR (road_address IS NULL AND ? IS NULL))
+                        AND (jibun_address = ? OR (jibun_address IS NULL AND ? IS NULL)) THEN 0
+                       ELSE 1 END,
                    road_address = CASE WHEN coordinate_source = 'ADMIN_CONFIRMED' THEN road_address ELSE ? END,
                    jibun_address = CASE WHEN coordinate_source = 'ADMIN_CONFIRMED' THEN jibun_address ELSE ? END,
                    male_toilet_count = ?, male_urinal_count = ?,
@@ -42,7 +47,7 @@ public class ToiletSyncWriter {
 
     private static final String FILL_MISSING_COORDINATE_SQL = """
             UPDATE toilet SET latitude = ?, longitude = ?, coordinate_source = ?,
-                geocoded_address_hash = ?, geocoded_at = ?
+                geocoded_address_hash = ?, geocoded_at = ?, region_revision = region_revision + 1
             WHERE mng_no = ? AND latitude IS NULL AND longitude IS NULL
                 AND coordinate_source <> 'ADMIN_CONFIRMED'
             """;
@@ -84,7 +89,9 @@ public class ToiletSyncWriter {
     private Object[] updateArguments(ResolvedRestroomRecord resolvedRecord) {
         var record = resolvedRecord.restroom();
         return new Object[]{
-                record.name(), record.toiletType(), record.roadAddress(), record.jibunAddress(),
+                record.name(), record.toiletType(), record.roadAddress(), record.roadAddress(),
+                record.jibunAddress(), record.jibunAddress(),
+                record.roadAddress(), record.jibunAddress(),
                 record.maleToiletCount(), record.maleUrinalCount(),
                 record.maleDisabledToiletCount(), record.maleDisabledUrinalCount(),
                 record.maleChildToiletCount(), record.maleChildUrinalCount(),
