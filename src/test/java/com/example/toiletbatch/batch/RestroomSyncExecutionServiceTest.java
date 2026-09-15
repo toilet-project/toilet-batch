@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -32,7 +33,7 @@ class RestroomSyncExecutionServiceTest {
                 LocalDateTime.of(2026, 8, 26, 0, 0), LocalDateTime.of(2026, 8, 29, 0, 0),
                 2, 103, 22, 81, 0
         );
-        when(restroomSyncService.synchronize(any(), any())).thenReturn(result);
+        when(restroomSyncService.synchronize(any(), any(), anyString())).thenReturn(result);
         when(historyRepository.countToilets()).thenReturn(12_345L);
 
         RestroomSyncResult actual = serviceAt("2026-08-29T02:00:00Z")
@@ -40,14 +41,14 @@ class RestroomSyncExecutionServiceTest {
 
         assertEquals(result, actual);
         verify(historyRepository).recordSuccess(
-                eq(BatchSyncTrigger.SCHEDULED), eq(result), eq(12_345L), any(), any()
+                anyString(), eq(BatchSyncTrigger.SCHEDULED), eq(result), eq(12_345L), any(), any()
         );
     }
 
     @Test
     void savesFailureWithTheScheduledRangeThenRethrows() {
         RuntimeException exception = new IllegalStateException("공공데이터 API 호출 실패");
-        when(restroomSyncService.synchronize(any(), any())).thenThrow(exception);
+        when(restroomSyncService.synchronize(any(), any(), anyString())).thenThrow(exception);
         ArgumentCaptor<LocalDateTime> fromCaptor = ArgumentCaptor.forClass(LocalDateTime.class);
         ArgumentCaptor<LocalDateTime> toCaptor = ArgumentCaptor.forClass(LocalDateTime.class);
 
@@ -55,7 +56,7 @@ class RestroomSyncExecutionServiceTest {
                 .synchronizeRecentUpdates(BatchSyncTrigger.MANUAL));
 
         verify(historyRepository).recordFailure(
-                eq(BatchSyncTrigger.MANUAL), fromCaptor.capture(), toCaptor.capture(), any(), any(), eq(exception)
+                anyString(), eq(BatchSyncTrigger.MANUAL), fromCaptor.capture(), toCaptor.capture(), any(), any(), eq(exception)
         );
         assertEquals(LocalDateTime.of(2026, 8, 26, 0, 0), fromCaptor.getValue());
         assertEquals(LocalDateTime.of(2026, 8, 29, 0, 0), toCaptor.getValue());

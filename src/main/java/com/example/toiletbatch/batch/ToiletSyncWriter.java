@@ -44,6 +44,7 @@ public class ToiletSyncWriter {
             """;
 
     private final JdbcTemplate jdbcTemplate;
+    private final PublicDataChangeReviewWriter reviewWriter;
 
     private static final String FILL_MISSING_COORDINATE_SQL = """
             UPDATE toilet SET latitude = ?, longitude = ?, coordinate_source = ?,
@@ -52,12 +53,14 @@ public class ToiletSyncWriter {
                 AND coordinate_source <> 'ADMIN_CONFIRMED'
             """;
 
-    public ToiletSyncWriter(JdbcTemplate jdbcTemplate) {
+    public ToiletSyncWriter(JdbcTemplate jdbcTemplate, PublicDataChangeReviewWriter reviewWriter) {
         this.jdbcTemplate = jdbcTemplate;
+        this.reviewWriter = reviewWriter;
     }
 
     @Transactional
-    public RestroomSyncWriteResult upsertPage(List<ResolvedRestroomRecord> records) {
+    public RestroomSyncWriteResult upsertPage(String executionKey, List<ResolvedRestroomRecord> records) {
+        if (!StringUtils.hasText(executionKey)) throw new IllegalArgumentException("배치 실행 식별자가 필요합니다.");
         int inserted = 0;
         int updated = 0;
         int skipped = 0;
@@ -65,6 +68,13 @@ public class ToiletSyncWriter {
         for (ResolvedRestroomRecord resolvedRecord : records) {
             var record = resolvedRecord.restroom();
             if (!StringUtils.hasText(record.managementNumber())) {
+                skipped++;
+                continue;
+            }
+
+            PublicDataChangeReviewWriter.Capture capture = reviewWriter.capture(executionKey, resolvedRecord);
+            if (capture == PublicDataChangeReviewWriter.Capture.DUPLICATE
+                    || capture == PublicDataChangeReviewWriter.Capture.CONFLICT) {
                 skipped++;
                 continue;
             }

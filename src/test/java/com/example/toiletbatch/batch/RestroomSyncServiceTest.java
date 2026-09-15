@@ -3,6 +3,7 @@ package com.example.toiletbatch.batch;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -39,13 +40,13 @@ class RestroomSyncServiceTest {
         when(apiClient.fetchPage(from, to, 1)).thenReturn(new PublicRestroomPage(List.of(record("A"), record("B")), 1, 100, 3));
         when(apiClient.fetchPage(from, to, 2)).thenReturn(new PublicRestroomPage(List.of(record("C")), 2, 100, 3));
         when(incrementalGeocodingService.resolveAll(any())).thenReturn(List.of());
-        when(toiletSyncWriter.upsertPage(any())).thenReturn(
+        when(toiletSyncWriter.upsertPage(eq("execution-1"), any())).thenReturn(
                 new RestroomSyncWriteResult(1, 1, 0),
                 new RestroomSyncWriteResult(0, 1, 0)
         );
 
         RestroomSyncService service = serviceAt("2026-08-25T02:00:00Z");
-        RestroomSyncResult result = service.synchronize(from, to);
+        RestroomSyncResult result = service.synchronize(from, to, "execution-1");
 
         assertEquals(2, result.requestedPages());
         assertEquals(3, result.receivedRecords());
@@ -54,7 +55,7 @@ class RestroomSyncServiceTest {
         assertEquals(0, result.skippedRecords());
         verify(apiClient).fetchPage(from, to, 1);
         verify(apiClient).fetchPage(from, to, 2);
-        verify(toiletSyncWriter, times(2)).upsertPage(any());
+        verify(toiletSyncWriter, times(2)).upsertPage(eq("execution-1"), any());
     }
 
     @Test
@@ -64,7 +65,7 @@ class RestroomSyncServiceTest {
         when(apiClient.fetchPage(eq(expectedFrom), eq(expectedTo), eq(1)))
                 .thenReturn(new PublicRestroomPage(List.of(), 1, 100, 0));
         when(incrementalGeocodingService.resolveAll(List.of())).thenReturn(List.of());
-        when(toiletSyncWriter.upsertPage(List.of())).thenReturn(new RestroomSyncWriteResult(0, 0, 0));
+        when(toiletSyncWriter.upsertPage(anyString(), eq(List.of()))).thenReturn(new RestroomSyncWriteResult(0, 0, 0));
 
         RestroomSyncResult result = serviceAt("2026-08-24T17:00:00Z").synchronizeRecentUpdates();
 
@@ -80,9 +81,9 @@ class RestroomSyncServiceTest {
                 .thenThrow(new IllegalStateException("temporary failure"))
                 .thenReturn(new PublicRestroomPage(List.of(), 1, 100, 0));
         when(incrementalGeocodingService.resolveAll(List.of())).thenReturn(List.of());
-        when(toiletSyncWriter.upsertPage(List.of())).thenReturn(new RestroomSyncWriteResult(0, 0, 0));
+        when(toiletSyncWriter.upsertPage(eq("execution-2"), eq(List.of()))).thenReturn(new RestroomSyncWriteResult(0, 0, 0));
 
-        RestroomSyncResult result = serviceAt("2026-08-25T02:00:00Z").synchronize(from, to);
+        RestroomSyncResult result = serviceAt("2026-08-25T02:00:00Z").synchronize(from, to, "execution-2");
 
         assertEquals(1, result.requestedPages());
         verify(apiClient, times(2)).fetchPage(from, to, 1);

@@ -3,6 +3,7 @@ package com.example.toiletbatch.batch;
 import java.time.Clock;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.UUID;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
@@ -41,10 +42,12 @@ public class RestroomSyncExecutionService {
         LocalDate today = LocalDate.now(clock);
         LocalDateTime fromInclusive = today.minusDays(properties.overlapDays()).atStartOfDay();
         LocalDateTime toExclusive = today.atStartOfDay();
+        String executionKey = UUID.randomUUID().toString();
 
         try {
-            RestroomSyncResult result = restroomSyncService.synchronize(fromInclusive, toExclusive);
+            RestroomSyncResult result = restroomSyncService.synchronize(fromInclusive, toExclusive, executionKey);
             historyRepository.recordSuccess(
+                    executionKey,
                     trigger,
                     result,
                     historyRepository.countToilets(),
@@ -54,6 +57,7 @@ public class RestroomSyncExecutionService {
             return result;
         } catch (RuntimeException exception) {
             historyRepository.recordFailure(
+                    executionKey,
                     trigger,
                     fromInclusive,
                     toExclusive,
