@@ -93,6 +93,7 @@ class PublicDataChangeReviewWriterTest {
                 writer.capture(key(1), resolved("서울 도로 3", "서울 지번 3", "37.7000000", "127.3000000")));
 
         assertEquals("CONFLICT", db.queryForObject("SELECT result FROM public_data_confirmed_receipt", String.class));
+        assertEquals(1L, db.queryForObject("SELECT review_id FROM public_data_confirmed_receipt", Long.class));
         assertEquals("SUPERSEDED", db.queryForObject("SELECT status FROM public_data_change_review", String.class));
         assertEquals("BATCH_INPUT_CONFLICT", db.queryForObject("SELECT status_reason FROM public_data_change_review", String.class));
     }

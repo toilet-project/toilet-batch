@@ -144,7 +144,7 @@ class PublicDataChangeReviewWriter {
         supersedeActive(toiletId, "BATCH_INPUT_CONFLICT", null);
         jdbc.update("""
                 UPDATE public_data_confirmed_receipt
-                   SET review_id=NULL,result='CONFLICT',input_hash=?,protected_after_hash=?,received_at=CURRENT_TIMESTAMP
+                   SET result='CONFLICT',input_hash=?,protected_after_hash=?,received_at=CURRENT_TIMESTAMP
                  WHERE execution_key=? AND toilet_id=?
                 """, incomingHash, baselineHash, executionKey, toiletId);
     }
