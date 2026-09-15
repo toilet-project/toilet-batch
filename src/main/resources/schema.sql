@@ -1,5 +1,6 @@
 CREATE TABLE IF NOT EXISTS batch_sync_history (
     id BIGINT NOT NULL AUTO_INCREMENT,
+    execution_key CHAR(36) NULL,
     job_name VARCHAR(100) NOT NULL,
     trigger_type VARCHAR(30) NOT NULL,
     status VARCHAR(20) NOT NULL,
@@ -16,6 +17,7 @@ CREATE TABLE IF NOT EXISTS batch_sync_history (
     completed_at DATETIME NOT NULL,
     error_message VARCHAR(1000) NULL,
     PRIMARY KEY (id),
+    UNIQUE KEY uk_batch_sync_execution_key (execution_key),
     INDEX idx_batch_sync_history_started_at (started_at),
     INDEX idx_batch_sync_history_status_started_at (status, started_at)
 );

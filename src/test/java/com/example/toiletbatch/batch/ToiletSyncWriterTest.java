@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -23,12 +24,16 @@ class ToiletSyncWriterTest {
     @Mock
     private JdbcTemplate jdbcTemplate;
 
+    @Mock
+    private PublicDataChangeReviewWriter reviewWriter;
+
     @Test
     void updatesExistingRowsInsertsNewRowsAndSkipsRowsWithoutManagementNumber() {
         when(jdbcTemplate.update(anyString(), any(Object[].class))).thenReturn(0, 1, 0, 0, 1);
 
-        ToiletSyncWriter writer = new ToiletSyncWriter(jdbcTemplate);
-        RestroomSyncWriteResult result = writer.upsertPage(List.of(record("EXISTING"), record("NEW"), record("")));
+        when(reviewWriter.capture(anyString(), any())).thenReturn(PublicDataChangeReviewWriter.Capture.NOT_PROTECTED);
+        ToiletSyncWriter writer = new ToiletSyncWriter(jdbcTemplate, reviewWriter);
+        RestroomSyncWriteResult result = writer.upsertPage("execution-1", List.of(record("EXISTING"), record("NEW"), record("")));
 
         assertEquals(1, result.updatedRecords());
         assertEquals(1, result.insertedRecords());
@@ -67,8 +72,10 @@ class ToiletSyncWriterTest {
                 """);
         db.update("INSERT INTO toilet(mng_no,latitude,longitude,coordinate_source) VALUES('A',37.5,127.5,'ADMIN_CONFIRMED'),('B',NULL,NULL,'LEGACY')");
         db.update("UPDATE toilet SET road_address=NULL,jibun_address='관리자 확정 지번' WHERE mng_no='A'");
-        var writer = new ToiletSyncWriter(db);
-        writer.upsertPage(List.of(record("A"), record("B")));
+        var capture = mock(PublicDataChangeReviewWriter.class);
+        when(capture.capture(anyString(), any())).thenReturn(PublicDataChangeReviewWriter.Capture.NOT_PROTECTED);
+        var writer = new ToiletSyncWriter(db, capture);
+        writer.upsertPage("execution-2", List.of(record("A"), record("B")));
         assertEquals(new BigDecimal("37.5000000"), db.queryForObject("SELECT latitude FROM toilet WHERE mng_no='A'", BigDecimal.class));
         assertEquals("ADMIN_CONFIRMED", db.queryForObject("SELECT coordinate_source FROM toilet WHERE mng_no='A'", String.class));
         org.junit.jupiter.api.Assertions.assertNull(db.queryForObject("SELECT road_address FROM toilet WHERE mng_no='A'", String.class));

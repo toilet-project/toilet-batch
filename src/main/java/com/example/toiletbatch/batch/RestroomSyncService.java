@@ -6,6 +6,7 @@ import java.time.Clock;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.concurrent.locks.ReentrantLock;
+import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -51,11 +52,15 @@ public class RestroomSyncService {
         LocalDate today = LocalDate.now(clock);
         return synchronize(
                 today.minusDays(properties.overlapDays()).atStartOfDay(),
-                today.atStartOfDay()
+                today.atStartOfDay(), UUID.randomUUID().toString()
         );
     }
 
     public RestroomSyncResult synchronize(LocalDateTime fromInclusive, LocalDateTime toExclusive) {
+        return synchronize(fromInclusive, toExclusive, UUID.randomUUID().toString());
+    }
+
+    public RestroomSyncResult synchronize(LocalDateTime fromInclusive, LocalDateTime toExclusive, String executionKey) {
         if (!executionLock.tryLock()) {
             throw new IllegalStateException("공중화장실 동기화가 이미 실행 중입니다.");
         }
@@ -72,9 +77,8 @@ public class RestroomSyncService {
                 PublicRestroomPage page = fetchPageWithRetry(fromInclusive, toExclusive, pageNumber);
                 requestedPages++;
 
-                RestroomSyncWriteResult writeResult = toiletSyncWriter.upsertPage(
-                        incrementalGeocodingService.resolveAll(page.records())
-                );
+                RestroomSyncWriteResult writeResult = toiletSyncWriter.upsertPage(executionKey,
+                        incrementalGeocodingService.resolveAll(page.records()));
                 receivedRecords += page.records().size();
                 insertedRecords += writeResult.insertedRecords();
                 updatedRecords += writeResult.updatedRecords();

@@ -11,18 +11,18 @@ public class BatchSyncHistoryRepository {
 
     private static final String INSERT_SUCCESS_SQL = """
             INSERT INTO batch_sync_history (
-                job_name, trigger_type, status, range_from, range_to,
+                execution_key, job_name, trigger_type, status, range_from, range_to,
                 requested_pages, received_records, inserted_records, updated_records,
                 skipped_records, failed_records, total_toilet_count, started_at, completed_at
-            ) VALUES (?, ?, 'SUCCESS', ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)
+            ) VALUES (?, ?, ?, 'SUCCESS', ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)
             """;
 
     private static final String INSERT_FAILURE_SQL = """
             INSERT INTO batch_sync_history (
-                job_name, trigger_type, status, range_from, range_to,
+                execution_key, job_name, trigger_type, status, range_from, range_to,
                 requested_pages, received_records, inserted_records, updated_records,
                 skipped_records, failed_records, total_toilet_count, started_at, completed_at, error_message
-            ) VALUES (?, ?, 'FAILED', ?, ?, 0, 0, 0, 0, 0, 0, NULL, ?, ?, ?)
+            ) VALUES (?, ?, ?, 'FAILED', ?, ?, 0, 0, 0, 0, 0, 0, NULL, ?, ?, ?)
             """;
 
     private final JdbcTemplate jdbcTemplate;
@@ -32,6 +32,7 @@ public class BatchSyncHistoryRepository {
     }
 
     public void recordSuccess(
+            String executionKey,
             BatchSyncTrigger trigger,
             RestroomSyncResult result,
             long totalToiletCount,
@@ -40,6 +41,7 @@ public class BatchSyncHistoryRepository {
     ) {
         jdbcTemplate.update(
                 INSERT_SUCCESS_SQL,
+                executionKey,
                 JOB_NAME,
                 trigger.name(),
                 result.fromInclusive(),
@@ -56,6 +58,7 @@ public class BatchSyncHistoryRepository {
     }
 
     public void recordFailure(
+            String executionKey,
             BatchSyncTrigger trigger,
             LocalDateTime fromInclusive,
             LocalDateTime toExclusive,
@@ -65,6 +68,7 @@ public class BatchSyncHistoryRepository {
     ) {
         jdbcTemplate.update(
                 INSERT_FAILURE_SQL,
+                executionKey,
                 JOB_NAME,
                 trigger.name(),
                 fromInclusive,
