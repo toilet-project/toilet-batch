@@ -32,12 +32,13 @@ class PublicDataChangeReviewWriter {
     Capture capture(String executionKey, ResolvedRestroomRecord resolved) {
         PublicRestroomRecord proposal = resolved.restroom();
         Optional<Snapshot> existing = snapshot(proposal.managementNumber());
-        if (existing.isEmpty() || !"ADMIN_CONFIRMED".equals(existing.get().coordinateSource()))
+        if (existing.isEmpty() || (!"ADMIN_CONFIRMED".equals(existing.get().coordinateSource()) && existing.get().hiddenEventId()==null))
             return Capture.NOT_PROTECTED;
 
         Snapshot current = existing.get();
-        String baselineHash = hash(current.latitude(), current.longitude(), current.roadAddress(), current.jibunAddress());
-        String proposalHash = hash(proposal.latitude(), proposal.longitude(), proposal.roadAddress(), proposal.jibunAddress());
+        boolean hidden = current.hiddenEventId()!=null;
+        String baselineHash = hidden ? hashNamed(current.name(),current.latitude(),current.longitude(),current.roadAddress(),current.jibunAddress()) : hash(current.latitude(), current.longitude(), current.roadAddress(), current.jibunAddress());
+        String proposalHash = hidden ? hashNamed(proposal.name(),proposal.latitude(),proposal.longitude(),proposal.roadAddress(),proposal.jibunAddress()) : hash(proposal.latitude(), proposal.longitude(), proposal.roadAddress(), proposal.jibunAddress());
         Optional<ExistingReceipt> priorReceipt = receipt(executionKey, current.toiletId());
         if (priorReceipt.isPresent()) {
             if (priorReceipt.get().inputHash().equals(proposalHash)) return Capture.DUPLICATE;
@@ -52,7 +53,7 @@ class PublicDataChangeReviewWriter {
             return Capture.RECORDED;
         }
 
-        ExistingReview reusable = reusable(current.toiletId(), baselineHash, proposalHash).orElse(null);
+        ExistingReview reusable = reusable(current.toiletId(), baselineHash, proposalHash, current.hiddenEventId()).orElse(null);
         Long reviewId;
         String result;
         if (reusable != null && ("PENDING".equals(reusable.status()) || "KEPT_CURRENT".equals(reusable.status()))) {
@@ -74,12 +75,13 @@ class PublicDataChangeReviewWriter {
                         (toilet_id,active_toilet_id,baseline_latitude,baseline_longitude,
                          baseline_road_address,baseline_jibun_address,proposal_latitude,proposal_longitude,
                          proposal_road_address,proposal_jibun_address,changed_fields,baseline_hash,proposal_hash,
-                         provider_updated_at,first_received_at,last_received_at,receipt_count,status,version)
-                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1,'PENDING',1)
+                         provider_updated_at,baseline_name,proposal_name,hidden_event_id,first_received_at,last_received_at,receipt_count,status,version)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1,'PENDING',1)
                     """, current.toiletId(), current.toiletId(), current.latitude(), current.longitude(),
                     current.roadAddress(), current.jibunAddress(), proposal.latitude(), proposal.longitude(),
                     clean(proposal.roadAddress()), clean(proposal.jibunAddress()), changedFields(current, proposal),
-                    baselineHash, proposalHash, providerUpdatedAt(proposal.dataUpdatedAt()));
+                    baselineHash, proposalHash, providerUpdatedAt(proposal.dataUpdatedAt()),
+                    hidden?current.name():null, hidden?clean(proposal.name()):null, current.hiddenEventId());
             reviewId = jdbc.queryForObject(
                     "SELECT review_id FROM public_data_change_review WHERE active_toilet_id=?", Long.class, current.toiletId());
             for (Long oldId : old)
@@ -92,11 +94,11 @@ class PublicDataChangeReviewWriter {
 
     private Optional<Snapshot> snapshot(String managementNumber) {
         List<Snapshot> rows = jdbc.query("""
-                SELECT toilet_id,coordinate_source,latitude,longitude,road_address,jibun_address
+                SELECT toilet_id,name,hidden_event_id,coordinate_source,latitude,longitude,road_address,jibun_address
                   FROM toilet WHERE mng_no=? FOR UPDATE
                 """, (rs, row) -> new Snapshot(rs.getLong("toilet_id"), rs.getString("coordinate_source"),
                 rs.getBigDecimal("latitude"), rs.getBigDecimal("longitude"), rs.getString("road_address"),
-                rs.getString("jibun_address")), managementNumber);
+                rs.getString("jibun_address"), rs.getString("name"),rs.getObject("hidden_event_id",Long.class)), managementNumber);
         return rows.stream().findFirst();
     }
 
@@ -109,13 +111,14 @@ class PublicDataChangeReviewWriter {
         return rows.stream().findFirst();
     }
 
-    private Optional<ExistingReview> reusable(long toiletId, String baselineHash, String proposalHash) {
+    private Optional<ExistingReview> reusable(long toiletId, String baselineHash, String proposalHash,Long hiddenEventId) {
         List<ExistingReview> rows = jdbc.query("""
                 SELECT review_id,status FROM public_data_change_review
                  WHERE toilet_id=? AND baseline_hash=? AND proposal_hash=?
+                   AND (hidden_event_id=? OR (hidden_event_id IS NULL AND ? IS NULL))
                  ORDER BY review_id DESC LIMIT 1
                 """, (rs, row) -> new ExistingReview(rs.getLong("review_id"), rs.getString("status")),
-                toiletId, baselineHash, proposalHash);
+                toiletId, baselineHash, proposalHash,hiddenEventId,hiddenEventId);
         return rows.stream().findFirst();
     }
 
@@ -174,6 +177,7 @@ class PublicDataChangeReviewWriter {
 
     private static String changedFields(Snapshot current, PublicRestroomRecord proposal) {
         List<String> fields = new ArrayList<>();
+        if(current.hiddenEventId()!=null && !normalize(current.name()).equals(normalize(proposal.name()))) fields.add("NAME");
         if (!coordinate(current.latitude()).equals(coordinate(proposal.latitude()))) fields.add("LATITUDE");
         if (!coordinate(current.longitude()).equals(coordinate(proposal.longitude()))) fields.add("LONGITUDE");
         if (!normalize(current.roadAddress()).equals(normalize(proposal.roadAddress()))) fields.add("ROAD_ADDRESS");
@@ -205,8 +209,12 @@ class PublicDataChangeReviewWriter {
         return value == null || value.isBlank() ? null : value.trim().replaceAll("\\s+", " ");
     }
 
+    static String hashNamed(String name,BigDecimal lat,BigDecimal lng,String road,String jibun) {
+        try { return java.util.HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest((normalize(name)+"\u001f"+hash(lat,lng,road,jibun)).getBytes(StandardCharsets.UTF_8))); }
+        catch(NoSuchAlgorithmException e){throw new IllegalStateException(e);}
+    }
     private record Snapshot(long toiletId, String coordinateSource, BigDecimal latitude, BigDecimal longitude,
-                            String roadAddress, String jibunAddress) {}
+                            String roadAddress, String jibunAddress,String name,Long hiddenEventId) {}
     private record ExistingReceipt(String inputHash, Long reviewId) {}
     private record ExistingReview(long id, String status) {}
 }

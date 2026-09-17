@@ -68,7 +68,8 @@ class ToiletSyncWriterTest {
                 has_emergency_bell VARCHAR(10), emergency_bell_location VARCHAR(100), has_cctv VARCHAR(10),
                 has_diaper_table VARCHAR(10), diaper_table_location VARCHAR(100), data_base_date VARCHAR(20),
                 coordinate_source VARCHAR(30), geocoded_address_hash CHAR(64), geocoded_at TIMESTAMP,
-                data_source VARCHAR(20), region_revision BIGINT NOT NULL DEFAULT 1)
+                data_source VARCHAR(20), region_revision BIGINT NOT NULL DEFAULT 1,
+                visibility_status VARCHAR(24) NOT NULL DEFAULT 'VISIBLE')
                 """);
         db.update("INSERT INTO toilet(mng_no,latitude,longitude,coordinate_source) VALUES('A',37.5,127.5,'ADMIN_CONFIRMED'),('B',NULL,NULL,'LEGACY')");
         db.update("UPDATE toilet SET road_address=NULL,jibun_address='관리자 확정 지번' WHERE mng_no='A'");
@@ -85,5 +86,12 @@ class ToiletSyncWriterTest {
         assertEquals(new BigDecimal("36.3500000"), db.queryForObject("SELECT latitude FROM toilet WHERE mng_no='B'", BigDecimal.class));
         assertEquals(1L, db.queryForObject("SELECT region_revision FROM toilet WHERE mng_no='A'", Long.class));
         assertEquals(3L, db.queryForObject("SELECT region_revision FROM toilet WHERE mng_no='B'", Long.class));
+        db.update("INSERT INTO toilet(mng_no,name,road_address,visibility_status,coordinate_source) VALUES('H','숨김 원본','숨김 주소','HIDDEN_DUPLICATE','LEGACY')");
+        writer.upsertPage("execution-hidden", List.of(record("H")));
+        assertEquals("숨김 원본", db.queryForObject("SELECT name FROM toilet WHERE mng_no='H'", String.class));
+        assertEquals("숨김 주소", db.queryForObject("SELECT road_address FROM toilet WHERE mng_no='H'", String.class));
+        org.junit.jupiter.api.Assertions.assertNull(db.queryForObject("SELECT latitude FROM toilet WHERE mng_no='H'", BigDecimal.class));
+        assertEquals("HIDDEN_DUPLICATE", db.queryForObject("SELECT visibility_status FROM toilet WHERE mng_no='H'", String.class));
+        assertEquals(1L, db.queryForObject("SELECT region_revision FROM toilet WHERE mng_no='H'", Long.class));
     }
 }

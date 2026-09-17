@@ -22,7 +22,7 @@ class PublicDataChangeReviewWriterTest {
         db = new JdbcTemplate(dataSource);
         db.execute("""
                 CREATE TABLE toilet(
-                  toilet_id BIGINT AUTO_INCREMENT PRIMARY KEY,mng_no VARCHAR(50),coordinate_source VARCHAR(30),
+                  toilet_id BIGINT AUTO_INCREMENT PRIMARY KEY,mng_no VARCHAR(50),coordinate_source VARCHAR(30),name VARCHAR(100),hidden_event_id BIGINT,
                   latitude DECIMAL(10,7),longitude DECIMAL(10,7),road_address VARCHAR(255),jibun_address VARCHAR(255))
                 """);
         db.execute("""
@@ -30,7 +30,7 @@ class PublicDataChangeReviewWriterTest {
                   review_id BIGINT AUTO_INCREMENT PRIMARY KEY,toilet_id BIGINT NOT NULL,active_toilet_id BIGINT NULL UNIQUE,
                   baseline_latitude DECIMAL(10,7),baseline_longitude DECIMAL(10,7),baseline_road_address VARCHAR(255),baseline_jibun_address VARCHAR(255),
                   proposal_latitude DECIMAL(10,7),proposal_longitude DECIMAL(10,7),proposal_road_address VARCHAR(255),proposal_jibun_address VARCHAR(255),
-                  changed_fields VARCHAR(100),baseline_hash CHAR(64),proposal_hash CHAR(64),provider_updated_at DATETIME,
+                  changed_fields VARCHAR(100),baseline_hash CHAR(64),proposal_hash CHAR(64),provider_updated_at DATETIME,baseline_name VARCHAR(100),proposal_name VARCHAR(100),hidden_event_id BIGINT,
                   first_received_at DATETIME,last_received_at DATETIME,receipt_count INT,status VARCHAR(20),status_reason VARCHAR(500),
                   version BIGINT,superseded_by_review_id BIGINT,created_at DATETIME DEFAULT CURRENT_TIMESTAMP,updated_at DATETIME DEFAULT CURRENT_TIMESTAMP)
                 """);
@@ -112,6 +112,19 @@ class PublicDataChangeReviewWriterTest {
         assertEquals("482cf0a2de03f7b8290bbd66278a00c8deab5acfbdfacb1ee29f0949f7288fc4",
                 PublicDataChangeReviewWriter.hash(new BigDecimal("37.5"), new BigDecimal("127.1"),
                         " 서울  도로 1 ", "서울 지번 1"));
+    }
+
+    @Test
+    void hiddenUnconfirmedFacilityNameChangeCreatesCandidateAndSnapshotsHideEvent() {
+        db.update("UPDATE toilet SET coordinate_source='PUBLIC_DATA',name='이전 이름',hidden_event_id=8");
+        var result=writer.capture(key(1),resolved("서울 도로 1","서울 지번 1","37.5000000","127.1000000"));
+        assertEquals(PublicDataChangeReviewWriter.Capture.RECORDED,result);
+        assertEquals("NAME",db.queryForObject("SELECT changed_fields FROM public_data_change_review",String.class));
+        assertEquals(8L,db.queryForObject("SELECT hidden_event_id FROM public_data_change_review",Long.class));
+        assertEquals("이전 이름",db.queryForObject("SELECT baseline_name FROM public_data_change_review",String.class));
+        writer.capture(key(2),resolved("서울 도로 1","서울 지번 1","37.5000000","127.1000000"));
+        assertEquals(1L,count("public_data_change_review"));
+        assertEquals("이전 이름",db.queryForObject("SELECT name FROM toilet",String.class));
     }
 
     private ResolvedRestroomRecord resolved(String road, String jibun, String latitude, String longitude) {
