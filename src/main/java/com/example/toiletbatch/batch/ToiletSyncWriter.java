@@ -11,14 +11,14 @@ public class ToiletSyncWriter {
 
     private static final String UPDATE_SQL = """
             UPDATE toilet
-               SET name = ?, toilet_type = ?,
+               SET name = CASE WHEN visibility_status='HIDDEN_DUPLICATE' THEN name ELSE ? END, toilet_type = ?,
                    region_revision = region_revision + CASE
-                       WHEN coordinate_source = 'ADMIN_CONFIRMED' THEN 0
+                       WHEN coordinate_source = 'ADMIN_CONFIRMED' OR visibility_status='HIDDEN_DUPLICATE' THEN 0
                        WHEN (road_address = ? OR (road_address IS NULL AND ? IS NULL))
                         AND (jibun_address = ? OR (jibun_address IS NULL AND ? IS NULL)) THEN 0
                        ELSE 1 END,
-                   road_address = CASE WHEN coordinate_source = 'ADMIN_CONFIRMED' THEN road_address ELSE ? END,
-                   jibun_address = CASE WHEN coordinate_source = 'ADMIN_CONFIRMED' THEN jibun_address ELSE ? END,
+                   road_address = CASE WHEN coordinate_source = 'ADMIN_CONFIRMED' OR visibility_status='HIDDEN_DUPLICATE' THEN road_address ELSE ? END,
+                   jibun_address = CASE WHEN coordinate_source = 'ADMIN_CONFIRMED' OR visibility_status='HIDDEN_DUPLICATE' THEN jibun_address ELSE ? END,
                    male_toilet_count = ?, male_urinal_count = ?,
                    male_disabled_toilet_count = ?, male_disabled_urinal_count = ?,
                    male_child_toilet_count = ?, male_child_urinal_count = ?,
@@ -51,6 +51,7 @@ public class ToiletSyncWriter {
                 geocoded_address_hash = ?, geocoded_at = ?, region_revision = region_revision + 1
             WHERE mng_no = ? AND latitude IS NULL AND longitude IS NULL
                 AND coordinate_source <> 'ADMIN_CONFIRMED'
+                AND visibility_status='VISIBLE'
             """;
 
     public ToiletSyncWriter(JdbcTemplate jdbcTemplate, PublicDataChangeReviewWriter reviewWriter) {
