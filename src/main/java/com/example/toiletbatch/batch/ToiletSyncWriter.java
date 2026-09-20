@@ -1,5 +1,6 @@
 package com.example.toiletbatch.batch;
 
+import com.example.toiletbatch.openinghours.OpeningHoursSynchronizer;
 import java.util.List;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
@@ -63,6 +64,7 @@ public class ToiletSyncWriter {
 
     private final JdbcTemplate jdbcTemplate;
     private final PublicDataChangeReviewWriter reviewWriter;
+    private final OpeningHoursSynchronizer openingHours;
 
     private static final String FILL_MISSING_COORDINATE_SQL = """
             UPDATE toilet SET latitude = ?, longitude = ?, coordinate_source = ?,
@@ -72,9 +74,11 @@ public class ToiletSyncWriter {
                 AND visibility_status='VISIBLE'
             """;
 
-    public ToiletSyncWriter(JdbcTemplate jdbcTemplate, PublicDataChangeReviewWriter reviewWriter) {
+    public ToiletSyncWriter(JdbcTemplate jdbcTemplate, PublicDataChangeReviewWriter reviewWriter,
+                            OpeningHoursSynchronizer openingHours) {
         this.jdbcTemplate = jdbcTemplate;
         this.reviewWriter = reviewWriter;
+        this.openingHours = openingHours;
     }
 
     @Transactional
@@ -106,12 +110,14 @@ public class ToiletSyncWriter {
             int affectedRows = jdbcTemplate.update(UPDATE_SQL, updateArguments(resolvedRecord));
             if (affectedRows > 0) {
                 synchronizeKoreanSource(record.managementNumber());
+                openingHours.synchronize(record.managementNumber());
                 updated++;
                 continue;
             }
 
             jdbcTemplate.update(INSERT_SQL, insertArguments(resolvedRecord));
             synchronizeKoreanSource(record.managementNumber());
+            openingHours.synchronize(record.managementNumber());
             inserted++;
         }
         return new RestroomSyncWriteResult(inserted, updated, skipped);

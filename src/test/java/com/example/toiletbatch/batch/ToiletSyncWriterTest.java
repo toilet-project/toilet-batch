@@ -9,6 +9,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.example.toiletbatch.publicdata.PublicRestroomRecord;
+import com.example.toiletbatch.openinghours.OpeningHoursSynchronizer;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -30,18 +31,22 @@ public class ToiletSyncWriterTest {
     @Mock
     private PublicDataChangeReviewWriter reviewWriter;
 
+    @Mock
+    private OpeningHoursSynchronizer openingHours;
+
     @Test
     void updatesExistingRowsInsertsNewRowsAndSkipsRowsWithoutManagementNumber() {
         when(jdbcTemplate.update(anyString(), any(Object[].class))).thenReturn(0, 1, 1, 0, 0, 1, 1);
 
         when(reviewWriter.capture(anyString(), any())).thenReturn(PublicDataChangeReviewWriter.Capture.NOT_PROTECTED);
-        ToiletSyncWriter writer = new ToiletSyncWriter(jdbcTemplate, reviewWriter);
+        ToiletSyncWriter writer = new ToiletSyncWriter(jdbcTemplate, reviewWriter, openingHours);
         RestroomSyncWriteResult result = writer.upsertPage("execution-1", List.of(record("EXISTING"), record("NEW"), record("")));
 
         assertEquals(1, result.updatedRecords());
         assertEquals(1, result.insertedRecords());
         assertEquals(1, result.skippedRecords());
         verify(jdbcTemplate, times(7)).update(anyString(), any(Object[].class));
+        verify(openingHours, times(2)).synchronize(anyString());
     }
 
     private ResolvedRestroomRecord record(String managementNumber) {
@@ -88,7 +93,8 @@ public class ToiletSyncWriterTest {
         db.update("UPDATE toilet SET road_address=NULL,jibun_address='관리자 확정 지번' WHERE mng_no='A'");
         var capture = mock(PublicDataChangeReviewWriter.class);
         when(capture.capture(anyString(), any())).thenReturn(PublicDataChangeReviewWriter.Capture.NOT_PROTECTED);
-        var writer = new ToiletSyncWriter(db, capture);
+        var normalized = mock(OpeningHoursSynchronizer.class);
+        var writer = new ToiletSyncWriter(db, capture, normalized);
         writer.upsertPage("execution-2", List.of(record("A"), record("B")));
         assertEquals(new BigDecimal("37.5000000"), db.queryForObject("SELECT latitude FROM toilet WHERE mng_no='A'", BigDecimal.class));
         assertEquals("ADMIN_CONFIRMED", db.queryForObject("SELECT coordinate_source FROM toilet WHERE mng_no='A'", String.class));
@@ -111,6 +117,7 @@ public class ToiletSyncWriterTest {
                 SELECT tr.jibun_address FROM toilet_translation tr
                 JOIN toilet t ON t.toilet_id=tr.toilet_id WHERE t.mng_no='A' AND tr.locale='ko'
                 """, String.class));
+        verify(normalized, times(3)).synchronize(anyString());
     }
 
     public static String sha2(String input, int bits) throws Exception {
