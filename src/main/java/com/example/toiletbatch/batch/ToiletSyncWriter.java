@@ -43,6 +43,24 @@ public class ToiletSyncWriter {
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PUBLIC_DATA')
             """;
 
+    private static final String SYNCHRONIZE_KOREAN_SOURCE_SQL = """
+            INSERT INTO toilet_translation
+                (toilet_id,locale,name,road_address,jibun_address,source_hash,
+                 translation_status,translation_source,manual_override,
+                 translated_at,reviewed_at,created_at,updated_at)
+            SELECT t.toilet_id,'ko',t.name,t.road_address,t.jibun_address,
+                   SHA2(CONCAT(COALESCE(TRIM(t.name), ''), CHAR(31),
+                               COALESCE(TRIM(t.road_address), ''), CHAR(31),
+                               COALESCE(TRIM(t.jibun_address), '')), 256),
+                   'SOURCE','SOURCE',FALSE,NULL,NULL,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP
+              FROM toilet t WHERE t.mng_no = ?
+            ON DUPLICATE KEY UPDATE
+                version=CASE WHEN source_hash<>VALUES(source_hash) THEN version+1 ELSE version END,
+                updated_at=CASE WHEN source_hash<>VALUES(source_hash) THEN VALUES(updated_at) ELSE updated_at END,
+                name=VALUES(name),road_address=VALUES(road_address),jibun_address=VALUES(jibun_address),
+                source_hash=VALUES(source_hash),translation_status='SOURCE',translation_source='SOURCE'
+            """;
+
     private final JdbcTemplate jdbcTemplate;
     private final PublicDataChangeReviewWriter reviewWriter;
 
@@ -87,14 +105,21 @@ public class ToiletSyncWriter {
                     resolvedRecord.geocodedAt(), record.managementNumber());
             int affectedRows = jdbcTemplate.update(UPDATE_SQL, updateArguments(resolvedRecord));
             if (affectedRows > 0) {
+                synchronizeKoreanSource(record.managementNumber());
                 updated++;
                 continue;
             }
 
             jdbcTemplate.update(INSERT_SQL, insertArguments(resolvedRecord));
+            synchronizeKoreanSource(record.managementNumber());
             inserted++;
         }
         return new RestroomSyncWriteResult(inserted, updated, skipped);
+    }
+
+    private void synchronizeKoreanSource(String managementNumber) {
+        int changed = jdbcTemplate.update(SYNCHRONIZE_KOREAN_SOURCE_SQL, managementNumber);
+        if (changed < 1) throw new IllegalStateException("한국어 표시 원문을 동기화하지 못했습니다.");
     }
 
     private Object[] updateArguments(ResolvedRestroomRecord resolvedRecord) {
