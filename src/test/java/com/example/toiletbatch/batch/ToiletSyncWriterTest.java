@@ -65,8 +65,12 @@ public class ToiletSyncWriterTest {
     void preservesCoordinatesCommittedAfterGeocodingSnapshotWasRead() {
         var ds = new org.springframework.jdbc.datasource.DriverManagerDataSource(
                 "jdbc:h2:mem:writer-region-guard;MODE=MySQL;DB_CLOSE_DELAY=-1", "sa", "");
+        verifyWriter(ds, true);
+    }
+
+    void verifyWriter(javax.sql.DataSource ds, boolean h2) {
         var db = new JdbcTemplate(ds);
-        db.execute("CREATE ALIAS SHA2 FOR 'com.example.toiletbatch.batch.ToiletSyncWriterTest.sha2'");
+        if (h2) db.execute("CREATE ALIAS SHA2 FOR 'com.example.toiletbatch.batch.ToiletSyncWriterTest.sha2'");
         db.execute("""
                 CREATE TABLE toilet(toilet_id BIGINT AUTO_INCREMENT PRIMARY KEY,mng_no VARCHAR(50), name VARCHAR(100), toilet_type VARCHAR(20),
                 road_address VARCHAR(255), jibun_address VARCHAR(255), latitude DECIMAL(10,7), longitude DECIMAL(10,7),
@@ -78,7 +82,9 @@ public class ToiletSyncWriterTest {
                 has_diaper_table VARCHAR(10), diaper_table_location VARCHAR(100), data_base_date VARCHAR(20),
                 coordinate_source VARCHAR(30), geocoded_address_hash CHAR(64), geocoded_at TIMESTAMP,
                 data_source VARCHAR(20), region_revision BIGINT NOT NULL DEFAULT 1,
-                visibility_status VARCHAR(24) NOT NULL DEFAULT 'VISIBLE')
+                visibility_status VARCHAR(24) NOT NULL DEFAULT 'VISIBLE',
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP)
                 """);
         db.execute("""
                 CREATE TABLE toilet_translation(
@@ -118,6 +124,20 @@ public class ToiletSyncWriterTest {
                 JOIN toilet t ON t.toilet_id=tr.toilet_id WHERE t.mng_no='A' AND tr.locale='ko'
                 """, String.class));
         verify(normalized, times(3)).synchronize(anyString());
+
+        // H2 reports zero for an unchanged upsert; MySQL's default JDBC connection reports the matched row.
+        if (!h2) {
+            db.update("UPDATE toilet_translation SET updated_at='2000-01-01 00:00:00' WHERE locale='ko'");
+            writer.upsertPage("execution-unchanged", List.of(record("A")));
+            assertEquals(LocalDateTime.of(2000, 1, 1, 0, 0), db.queryForObject("""
+                    SELECT tr.updated_at FROM toilet_translation tr
+                    JOIN toilet t ON t.toilet_id=tr.toilet_id WHERE t.mng_no='A' AND tr.locale='ko'
+                    """, LocalDateTime.class));
+            assertEquals(1L, db.queryForObject("""
+                    SELECT tr.version FROM toilet_translation tr
+                    JOIN toilet t ON t.toilet_id=tr.toilet_id WHERE t.mng_no='A' AND tr.locale='ko'
+                    """, Long.class));
+        }
     }
 
     public static String sha2(String input, int bits) throws Exception {

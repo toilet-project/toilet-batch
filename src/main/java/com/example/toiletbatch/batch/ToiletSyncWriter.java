@@ -56,8 +56,10 @@ public class ToiletSyncWriter {
                    'SOURCE','SOURCE',FALSE,NULL,NULL,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP
               FROM toilet t WHERE t.mng_no = ?
             ON DUPLICATE KEY UPDATE
-                version=CASE WHEN source_hash<>VALUES(source_hash) THEN version+1 ELSE version END,
-                updated_at=CASE WHEN source_hash<>VALUES(source_hash) THEN VALUES(updated_at) ELSE updated_at END,
+                version=CASE WHEN toilet_translation.source_hash<>VALUES(source_hash)
+                             THEN toilet_translation.version+1 ELSE toilet_translation.version END,
+                updated_at=CASE WHEN toilet_translation.source_hash<>VALUES(source_hash)
+                                THEN VALUES(updated_at) ELSE toilet_translation.updated_at END,
                 name=VALUES(name),road_address=VALUES(road_address),jibun_address=VALUES(jibun_address),
                 source_hash=VALUES(source_hash),translation_status='SOURCE',translation_source='SOURCE'
             """;
