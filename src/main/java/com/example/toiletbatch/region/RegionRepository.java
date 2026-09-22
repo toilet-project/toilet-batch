@@ -41,8 +41,11 @@ public final class RegionRepository {
     public record Snapshot(Source source, Result result) { }
     public List<Snapshot> pageWithRegions(long after, int size) throws Exception {
         try (var c = dataSource.getConnection(); var s = c.prepareStatement("""
-                SELECT t.toilet_id, t.road_address, t.jibun_address, t.latitude, t.longitude, r.result_json
-                FROM toilet t LEFT JOIN toilet_region r ON r.toilet_id=t.toilet_id
+                SELECT t.toilet_id, t.road_address, t.jibun_address, t.latitude, t.longitude, h.result_json
+                FROM toilet t
+                LEFT JOIN toilet_region_assignment a ON a.toilet_id=t.toilet_id
+                    AND a.source_revision=t.region_revision
+                LEFT JOIN toilet_region_assessment_history h ON h.assessment_id=a.assessment_id
                 WHERE t.toilet_id > ?
                 """ + sampleFilter + " ORDER BY t.toilet_id LIMIT ?")) {
             s.setLong(1, after); s.setInt(2, size);
@@ -61,9 +64,19 @@ public final class RegionRepository {
                 rs.getBigDecimal("latitude"), rs.getBigDecimal("longitude"));
     }
     public Result stored(long id) throws Exception {
-        try (var c = dataSource.getConnection(); var s = c.prepareStatement("SELECT result_json FROM toilet_region WHERE toilet_id = ?")) {
+        try (var c = dataSource.getConnection(); var s = c.prepareStatement("""
+                SELECT h.result_json FROM toilet t
+                LEFT JOIN toilet_region_assignment a ON a.toilet_id=t.toilet_id
+                    AND a.source_revision=t.region_revision
+                LEFT JOIN toilet_region_assessment_history h ON h.assessment_id=a.assessment_id
+                WHERE t.toilet_id = ?
+                """)) {
             s.setLong(1, id);
-            try (var rs = s.executeQuery()) { return rs.next() ? json.readValue(rs.getString(1), Result.class) : null; }
+            try (var rs = s.executeQuery()) {
+                if (!rs.next()) return null;
+                String payload = rs.getString(1);
+                return payload == null ? null : json.readValue(payload, Result.class);
+            }
         }
     }
     /** Dedicated MySQL advisory connection keeps different journal paths/processes from racing writes. */
@@ -106,30 +119,14 @@ public final class RegionRepository {
                         if (s.executeUpdate() != 1) throw new SQLException("Coordinate fill conflict");
                     }
                     result = result.withSource(current.withPoint(result.evaluated()));
+                    // Preserve the original input assessment and point the current assignment at
+                    // a second, post-fill snapshot so checkpoint reads match the new source hash.
+                    assessmentId = saveHistory(c, result);
                 }
-                save(c, result);
                 saveAssignment(c, result, assessmentId);
                 c.commit(); return new Applied(false, filled, result);
             } catch (Exception e) { c.rollback(); throw e; }
             finally { c.setAutoCommit(auto); }
-        }
-    }
-    private void save(Connection c, Result r) throws Exception {
-        String columns = "toilet_id,sido_name,sido_code,sigungu_name,sigungu_code,city_name,district_name,legal_dong_code,administrative_dong_code,region_source,status,reason,source_hash,source_latitude,source_longitude,source_road_address,source_jibun_address,evaluated_latitude,evaluated_longitude,result_json,checked_at";
-        String[] names = columns.split(",");
-        String update = java.util.Arrays.stream(names).skip(1).map(n -> n + "=VALUES(" + n + ")").collect(java.util.stream.Collectors.joining(","));
-        Region region = r.region();
-        Object[] values = {r.source().toiletId(), region == null ? null : region.sidoName(), region == null ? null : region.sidoCode(),
-                region == null ? null : region.sigunguName(), region == null ? null : region.sigunguCode(),
-                region == null ? null : region.cityName(), region == null ? null : region.districtName(),
-                region == null ? null : region.legalDongCode(), region == null ? null : region.administrativeDongCode(),
-                "KAKAO_COORD2REGIONCODE_B", r.status().name(), r.reason(), r.source().hash(), r.source().latitude(), r.source().longitude(),
-                r.source().roadAddress(), r.source().jibunAddress(), r.evaluated() == null ? null : r.evaluated().latitude(),
-                r.evaluated() == null ? null : r.evaluated().longitude(), json.writeValueAsString(r),
-                LocalDateTime.ofInstant(Instant.ofEpochMilli(r.checkedEpochMillis()), ZoneId.of("Asia/Seoul"))};
-        try (var s = c.prepareStatement("INSERT INTO toilet_region (" + columns + ") VALUES (" + String.join(",", java.util.Collections.nCopies(names.length, "?")) + ") ON DUPLICATE KEY UPDATE " + update)) {
-            for (int i = 0; i < values.length; i++) s.setObject(i + 1, values[i]);
-            s.executeUpdate();
         }
     }
     private long saveHistory(Connection c, Result r) throws Exception {

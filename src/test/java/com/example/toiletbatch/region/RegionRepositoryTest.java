@@ -25,14 +25,6 @@ class RegionRepositoryTest {
                 UNIQUE(toilet_id,source_hash,algorithm_version,checked_epoch_millis))
                 """);
         jdbc.execute("""
-                CREATE TABLE toilet_region(toilet_id BIGINT PRIMARY KEY, sido_name VARCHAR(50), sido_code CHAR(2),
-                sigungu_name VARCHAR(100), sigungu_code CHAR(5), city_name VARCHAR(50), district_name VARCHAR(50),
-                legal_dong_code CHAR(10), administrative_dong_code CHAR(10), region_source VARCHAR(40), status VARCHAR(30),
-                reason VARCHAR(100), source_hash CHAR(64), source_latitude DECIMAL(10,7), source_longitude DECIMAL(10,7),
-                source_road_address VARCHAR(255), source_jibun_address VARCHAR(255), evaluated_latitude DECIMAL(10,7),
-                evaluated_longitude DECIMAL(10,7), result_json TEXT, checked_at TIMESTAMP)
-                """);
-        jdbc.execute("""
                 CREATE TABLE toilet_region_assignment(toilet_id BIGINT PRIMARY KEY, sigungu_code CHAR(5),
                 legal_dong_code CHAR(10), administrative_dong_code CHAR(10), region_source VARCHAR(40),
                 status VARCHAR(30), reason VARCHAR(100), source_hash CHAR(64), source_revision BIGINT,
@@ -47,9 +39,9 @@ class RegionRepositoryTest {
         assertFalse(repository.apply(r, true).coordinatesFilled());
         repository.apply(r, true);
         assertEquals(source, repository.page(0, 100).getFirst());
-        assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM toilet_region", Integer.class));
         assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM toilet_region_assignment", Integer.class));
         assertEquals(r, repository.stored(1));
+        assertEquals(r, repository.pageWithRegions(0, 100).getFirst().result());
         assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM toilet_region_assessment_history", Integer.class));
     }
     @Test void concurrentLocationOrAddressChangeDiscardsStaleResult() throws Exception {
@@ -72,6 +64,15 @@ class RegionRepositoryTest {
         assertEquals(candidate, repository.page(0, 100).getFirst().point());
         assertEquals(2L, jdbc.queryForObject("SELECT region_revision FROM toilet WHERE toilet_id=1", Long.class));
         assertEquals("대전 유성구", repository.page(0, 100).getFirst().roadAddress());
+        Result stored = repository.stored(1);
+        assertEquals(candidate, stored.source().point());
+        assertTrue(RegionJob.fresh(stored, repository.page(0, 100).getFirst(), stored.checkedEpochMillis()));
+        assertEquals(4, jdbc.queryForObject("SELECT COUNT(*) FROM toilet_region_assessment_history", Integer.class));
+        assertEquals(stored.source().hash(), jdbc.queryForObject("""
+                SELECT h.source_hash FROM toilet_region_assignment a
+                JOIN toilet_region_assessment_history h ON h.assessment_id=a.assessment_id
+                WHERE a.toilet_id=1
+                """, String.class));
     }
     @Test void invalidationUsesActualCoordinatesNotUpdatedAt() throws Exception {
         jdbc.update("INSERT INTO toilet VALUES(1,'대전 유성구',NULL,36.3,127.3,'LEGACY',NULL,1)");
@@ -80,8 +81,9 @@ class RegionRepositoryTest {
         repository.apply(r, false);
         jdbc.update("UPDATE toilet SET coordinate_source='ADMIN_CONFIRMED' WHERE toilet_id=1");
         assertTrue(RegionJob.fresh(repository.stored(1), repository.page(0, 100).getFirst(), r.checkedEpochMillis()));
-        jdbc.update("UPDATE toilet SET longitude=127.4 WHERE toilet_id=1");
-        assertFalse(RegionJob.fresh(repository.stored(1), repository.page(0, 100).getFirst(), r.checkedEpochMillis()));
+        jdbc.update("UPDATE toilet SET longitude=127.4, region_revision=region_revision+1 WHERE toilet_id=1");
+        assertNull(repository.stored(1));
+        assertNull(repository.pageWithRegions(0, 100).getFirst().result());
     }
     @Test void recheckPreservesPriorDecisionEvidenceAndHistoryFailureRollsBack() throws Exception {
         jdbc.update("INSERT INTO toilet VALUES(1,'unknown',NULL,36.3,127.3,'LEGACY',NULL,1)");
@@ -96,9 +98,11 @@ class RegionRepositoryTest {
         assertEquals(2, jdbc.queryForObject("SELECT COUNT(*) FROM toilet_region_assessment_history", Integer.class));
         assertEquals(next, repository.stored(1));
         assertEquals(first.reason(), jdbc.queryForObject("SELECT reason FROM toilet_region_assessment_history ORDER BY assessment_id LIMIT 1", String.class));
+        Long assignedAssessmentId = jdbc.queryForObject("SELECT assessment_id FROM toilet_region_assignment WHERE toilet_id=1", Long.class);
         jdbc.execute("DROP TABLE toilet_region_assessment_history");
         assertThrows(Exception.class, () -> repository.apply(first, false));
-        assertEquals(next, repository.stored(1)); assertEquals(source, repository.page(0, 1).getFirst());
+        assertEquals(assignedAssessmentId, jdbc.queryForObject("SELECT assessment_id FROM toilet_region_assignment WHERE toilet_id=1", Long.class));
+        assertEquals(source, repository.page(0, 1).getFirst());
     }
     private Result result(Source source, Point point, Status status, String fallback) {
         Region region = new Region("대전광역시", "30", "유성구", "30200", null, null, "3020012200", null);
