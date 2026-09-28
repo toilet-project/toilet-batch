@@ -19,6 +19,10 @@ on:
         description: Current batch image commit (required for changes)
         type: string
         default: ''
+      candidate_commit:
+        description: Optional locally present candidate image for read-only diagnostics
+        type: string
+        default: ''
       approved:
         description: Operator approved this operation and disabled the old GitHub publisher
         type: boolean
@@ -83,6 +87,7 @@ jobs:
           OPERATION: ${{ inputs.operation }}
           APPROVED: ${{ inputs.approved }}
           REGISTER_BASELINE: ${{ inputs.register_baseline }}
+          CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
           API_COMMIT: ${{ inputs.api_commit }}
           BATCH_COMMIT: ${{ inputs.batch_commit }}
         run: |
@@ -100,7 +105,7 @@ jobs:
           from pathlib import Path
           config = dict(operation=os.environ['OPERATION'], approved=os.environ['APPROVED']=='true',
                         api_commit=os.environ['API_COMMIT'], batch_commit=os.environ['BATCH_COMMIT'],
-                        register_baseline=os.environ['REGISTER_BASELINE']=='true')
+                        register_baseline=os.environ['REGISTER_BASELINE']=='true', candidate_commit=os.environ['CANDIDATE_COMMIT'])
           if config['operation']=='configure': config['publish_token']=os.environ['MOBILE_CATALOG_PUBLISH_TOKEN']
           source = 'import json, types\nCONFIG = json.loads(' + repr(json.dumps(config)) + ')\n'
           source += 'resume = types.ModuleType("catalog_resume")\n'

@@ -46,6 +46,15 @@ def operate(config, resume):
     if operation == 'status':
         objects = host.capture()
         print(json.dumps(dict(stage='captured', images={role: obj['Config']['Image'] for role, obj in objects.items()})))
+        candidate = config.get('candidate_commit')
+        if candidate:
+            resume.require(re.fullmatch(r'[a-f0-9]{40}', candidate))
+            image = objects['batch']['Config']['Image']
+            old = json.loads(host.run(['docker', 'image', 'inspect', image]))[0]
+            new = json.loads(host.run(['docker', 'image', 'inspect', image.rsplit(':', 1)[0] + ':' + candidate]))[0]
+            old_env, new_env = resume.environment(old), resume.environment(new)
+            print(json.dumps(dict(stage='candidate-image', changedEnvironmentKeys=sorted(k for k in old_env.keys() | new_env.keys() if old_env.get(k) != new_env.get(k)),
+                                  javaVersion=dict(previous=old_env.get('JAVA_VERSION'), candidate=new_env.get('JAVA_VERSION')))))
         for role in ('api', 'batch'):
             resume.Host(role).healthy(objects[role])
         batch = resume.environment(objects['batch'])

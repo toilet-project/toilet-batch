@@ -24,6 +24,17 @@ def object_for(phase):
             'Image': 'synthetic:' + COMMIT, 'Env': [k + '=' + v for k, v in env.items()]}}
 
 class InspectionOrderTest(unittest.TestCase):
+    def test_pinned_java_patch_metadata_can_change_without_changing_service_configuration(self):
+        old = {'Config': {'Env': ['JAVA_VERSION=jdk-21.0.12+8', 'PATH=/bin']}}
+        new = {'Config': {'Env': ['JAVA_VERSION=jdk-21.0.12.1+1', 'PATH=/bin']}}
+        runtime = {'JAVA_VERSION': 'jdk-21.0.12+8', 'PATH': '/bin', 'ACCOUNT_RETENTION_ENABLED': 'true'}
+        actual = resume.rollout_environment(runtime, old, new, {'ACCOUNT_RETENTION_ENABLED': 'true'})
+        self.assertEqual(actual, dict(runtime, JAVA_VERSION='jdk-21.0.12.1+1'))
+        self.assertEqual(resume.rollout_environment(runtime, old, new, {'JAVA_VERSION': runtime['JAVA_VERSION']}), runtime)
+        for env in (['JAVA_VERSION=jdk-25.0.1+1', 'PATH=/bin'], ['JAVA_VERSION=jdk-21.0.12.1+1', 'PATH=/other']):
+            with self.assertRaises(ValueError):
+                resume.rollout_environment(runtime, old, {'Config': {'Env': env}}, {})
+
     def test_health_accepts_current_json_and_legacy_api_but_rejects_unhealthy_responses(self):
         for role in ('api', 'batch'):
             self.assertTrue(resume.health_body_ok(role, '{"status":"UP"}'))
@@ -114,7 +125,8 @@ class TransitionTest(unittest.TestCase):
         host.capture.return_value = objects
         host.check_dependencies.return_value = {'records': 3}
         host.run.side_effect = [json.dumps(rendered), json.dumps(replacement),
-                               json.dumps([{'RepoDigests': ['synthetic@sha256:' + 'c' * 64], 'Id': 'image-id'}]), 'image-id', 'old-image-id']
+                               json.dumps([{'RepoDigests': ['synthetic@sha256:' + 'c' * 64], 'Id': 'image-id', 'Config': {'Env': []}}]),
+                               json.dumps([{'Id': 'old-image-id', 'Config': {'Env': []}}]), 'image-id', 'old-image-id']
         args = SimpleNamespace(role='api', api_commit=COMMIT, batch_commit=COMMIT, next_commit='b' * 40,
                                next_image_digest='sha256:' + 'c' * 64, apply_approved=False)
         with patch.object(resume, 'Host', return_value=host), patch.object(resume, 'read_owned', return_value=source), \

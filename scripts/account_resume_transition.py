@@ -17,6 +17,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import traceback
 import urllib.request
 from datetime import datetime, timezone
 from html.parser import HTMLParser
@@ -327,6 +328,20 @@ def validate_image_only_render(original, replacement, service, image):
     expected['services'][service]['image'] = image
     require(replacement == expected, 'ACCOUNT_RESUME_NON_IMAGE_CHANGE_REJECTED')
 
+def rollout_environment(runtime, old_image, new_image, configured):
+    old, new = environment(old_image), environment(new_image)
+    changed = {key for key in old.keys() | new.keys() if old.get(key) != new.get(key)}
+    require(changed <= {'JAVA_VERSION'}, 'ACCOUNT_RESUME_IMAGE_ENVIRONMENT_CHANGE_REJECTED')
+    expected = dict(runtime)
+    if 'JAVA_VERSION' in changed:
+        require(all(re.fullmatch(r'jdk-21\.0\.\d+(?:\.\d+)?\+\d+', env.get('JAVA_VERSION', ''))
+                    for env in (old, new)), 'ACCOUNT_RESUME_JAVA_METADATA_REJECTED')
+        # Only inherited image metadata follows the pinned candidate; explicit service settings stay exact.
+        if 'JAVA_VERSION' not in configured and runtime.get('JAVA_VERSION') == old['JAVA_VERSION']:
+            expected['JAVA_VERSION'] = new['JAVA_VERSION']
+    return expected
+
+
 def preserve_rollout(args):
     require(re.fullmatch(r'sha256:[a-f0-9]{64}', args.next_image_digest or '') is not None)
     require(not args.apply_approved or (args.deployment_freeze_confirmed and args.schema_compatible_confirmed))
@@ -357,6 +372,9 @@ def preserve_rollout(args):
         image = json.loads(host.run(['docker', 'image', 'inspect', new_image]))[0]
         require(pinned in image.get('RepoDigests', []), 'ACCOUNT_RESUME_IMAGE_DIGEST_REJECTED')
         expected_id = image['Id']
+        old_metadata = json.loads(host.run(['docker', 'image', 'inspect', old_image]))[0]
+        expected_environment = rollout_environment(environment(original_objects[args.role]), old_metadata, image,
+                                                   rendered['services'][host.service].get('environment', {}))
         def before():
             require(host.capture() == original_objects)
             require(read_owned(host.root / '.env', private=True) == base_env)
@@ -370,7 +388,7 @@ def preserve_rollout(args):
             require(current[peer] == original_objects[peer])
             require(current[args.role]['Image'] == expected_id)
             require(read_owned(host.compose) == replacement)
-            require(environment(current[args.role]) == environment(original_objects[args.role]))
+            require(environment(current[args.role]) == expected_environment)
             require(phase_of(environment(current[args.role])) == initial_phase)
             require(read_owned(host.root / '.env', private=True) == base_env)
             require(read_owned(host.root / '.account-lifecycle.env', private=True) == account_env)
@@ -455,4 +473,10 @@ if __name__ == '__main__':
     except Exception as error:
         code = str(error) if str(error).startswith('ACCOUNT_RESUME_') and re.fullmatch(r'[A-Z_]+', str(error)) else 'ACCOUNT_RESUME_HELD'
         print(code + ' detailsSuppressed=true', file=sys.stderr)
+        cause = error
+        for _ in range(4):
+            frames = [dict(file=f.filename, line=f.lineno, function=f.name) for f in traceback.extract_tb(cause.__traceback__)]
+            print(json.dumps(dict(errorType=type(cause).__name__, frames=frames)), file=sys.stderr)
+            cause = cause.__context__
+            if cause is None: break
         raise SystemExit(1)
