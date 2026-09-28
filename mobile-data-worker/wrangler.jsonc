@@ -1,0 +1,9 @@
+{
+  "name": "geupddong-mobile-data",
+  "main": "worker.mjs",
+  "compatibility_date": "2026-09-01",
+  "account_id": "1611d88218de929b3ed6e2cd7c863be5",
+  "workers_dev": true,
+  "routes": [{ "pattern": "mobile-data.geupddong.com", "custom_domain": true }],
+  "r2_buckets": [{ "binding": "CATALOG", "bucket_name": "geupddong-mobile-data" }]
+}

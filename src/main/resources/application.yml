@@ -58,6 +58,15 @@ account:
     maintenance: ${ACCOUNT_LIFECYCLE_MAINTENANCE:true}
 
 batch:
+  mobile-catalog:
+    enabled: ${MOBILE_CATALOG_ENABLED:false}
+    cron: ${MOBILE_CATALOG_CRON:-}
+    origin: ${MOBILE_CATALOG_ORIGIN:https://mobile-data.geupddong.com}
+    publish-token: ${MOBILE_CATALOG_PUBLISH_TOKEN:}
+    python: ${MOBILE_CATALOG_PYTHON:python3}
+    script: ${MOBILE_CATALOG_SCRIPT:/app/mobile-data/publish.py}
+    work-directory: ${MOBILE_CATALOG_WORK_DIRECTORY:/tmp/geupddong-mobile-catalog}
+    timeout-seconds: 1200
   account-erasure:
     enabled: ${ACCOUNT_ERASURE_ENABLED:false}
     max-per-run: ${ACCOUNT_ERASURE_MAX_PER_RUN:5000}

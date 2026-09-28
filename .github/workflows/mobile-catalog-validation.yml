@@ -1,0 +1,33 @@
+name: Mobile catalog validation
+on:
+  pull_request:
+    paths:
+      - 'scripts/mobile-data/**'
+      - 'mobile-data-worker/**'
+      - 'src/main/java/com/example/toiletbatch/mobile/**'
+      - 'src/main/resources/mobile-catalog/**'
+      - 'src/test/java/com/example/toiletbatch/mobile/**'
+      - 'src/main/resources/application.yml'
+      - 'Dockerfile'
+      - '.github/workflows/mobile-catalog-validation.yml'
+      - '.github/workflows/mobile-catalog-operations.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - run: |
+          python3 -B -m unittest discover -s scripts/mobile-data -p 'test_*.py'
+          node --test mobile-data-worker/worker.test.mjs
+          chmod +x gradlew
+          ./gradlew test --tests 'com.example.toiletbatch.mobile.*' bootJar --no-daemon --console=plain
