@@ -63,7 +63,9 @@ Cutover order:
 
 The generic `deploy.yml` recreates base environment files. It is not the migration path: use the existing preserving rollout and retain the catalog settings on future deployments. No API image deployment, DB migration or website deployment is required.
 
-Migration status on 2026-09-28: the local batch implementation and tests are ready. The compatible Worker is deployed, but the production publisher still runs from the API repository until the controlled cutover is approved and executed. A local code move alone does not change the active job.
+Migration completed on 2026-09-28: the batch service runs image commit `e6e073f443ad0eaa44c617b5658e4f42ddd52165`, catalog publication is enabled at 04:30 KST, and the API repository's old publisher is disabled. The first batch publication succeeded with 51,918 facilities and all six locales; `v2/latest.json` is live. Android 0.1.46 cold-start logs confirmed `schema=2 update=none files=0` because its bundled data already matches the current database. API image and account settings were preserved. The reviewed operational workflow also supports the current JSON health response and inherited Java 21 patch metadata while preserving explicit service settings.
+
+Production receipts: [batch rollout](https://github.com/toilet-project/toilet-batch/actions/runs/36392145815), [scheduler configuration](https://github.com/toilet-project/toilet-batch/actions/runs/36392735776), [first publication](https://github.com/toilet-project/toilet-batch/actions/runs/36392945728), [running-state verification](https://github.com/toilet-project/toilet-batch/actions/runs/36393108986).
 
 ## Legacy retention and recovery
 
