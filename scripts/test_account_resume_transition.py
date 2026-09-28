@@ -24,6 +24,14 @@ def object_for(phase):
             'Image': 'synthetic:' + COMMIT, 'Env': [k + '=' + v for k, v in env.items()]}}
 
 class InspectionOrderTest(unittest.TestCase):
+    def test_health_accepts_current_json_and_legacy_api_but_rejects_unhealthy_responses(self):
+        for role in ('api', 'batch'):
+            self.assertTrue(resume.health_body_ok(role, '{"status":"UP"}'))
+            for body in ('{"status":"DOWN"}', '{"status":"UNKNOWN"}', '{}', '[]', 'null', 'UP', ''):
+                self.assertFalse(resume.health_body_ok(role, body))
+        self.assertTrue(resume.health_body_ok('api', 'API server is running (DB: toilet_db)'))
+        self.assertFalse(resume.health_body_ok('batch', 'API server is running (DB: toilet_db)'))
+
     def test_image_build_is_pinned_manual_and_has_no_server_access(self):
         source = (Path(__file__).parents[1] / '.github/workflows/account-image-build.yml').read_text()
         for text in ('workflow_dispatch:', "github.ref == 'refs/heads/main'",
