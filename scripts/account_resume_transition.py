@@ -91,6 +91,17 @@ START TRANSACTION READ ONLY;
 SELECT COUNT(*) FROM account_withdrawal;
 ROLLBACK;"""
 
+def health_body_ok(role, body):
+    # The API now returns the same non-sensitive JSON health shape as the batch.
+    if role == 'api' and body == 'API server is running (DB: toilet_db)':
+        return True
+    try:
+        value = json.loads(body)
+        return isinstance(value, dict) and value.get('status') == 'UP'
+    except (ValueError, TypeError):
+        return False
+
+
 def require(value, code='ACCOUNT_RESUME_HELD'):
     if not value:
         raise ValueError(code)
@@ -281,8 +292,7 @@ class Host:
         with opener.open('http://' + address + ':' + port + route, timeout=4) as response:
             require(response.status == 200)
             body = response.read(8192).decode()
-        require(body == 'API server is running (DB: toilet_db)' if self.role == 'api'
-                else json.loads(body).get('status') == 'UP')
+        require(health_body_ok(self.role, body), 'ACCOUNT_RESUME_HEALTH_RESPONSE_REJECTED')
 
     def restart(self):
         intended = parse_env(read_owned(self.root / '.account-lifecycle.env', private=True))
