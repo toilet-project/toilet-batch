@@ -1,0 +1,124 @@
+name: Mobile catalog batch operations
+on:
+  workflow_dispatch:
+    inputs:
+      expected_commit:
+        description: Exact approved main source commit
+        type: string
+        required: true
+      operation:
+        type: choice
+        options: [status, configure, publish]
+        default: status
+        description: Batch service operation
+      api_commit:
+        description: Current API image commit (required for changes)
+        type: string
+        default: ''
+      batch_commit:
+        description: Current batch image commit (required for changes)
+        type: string
+        default: ''
+      approved:
+        description: Operator approved this operation and disabled the old GitHub publisher
+        type: boolean
+        default: false
+      register_baseline:
+        description: Register the published version as the next APK baseline
+        type: boolean
+        default: false
+permissions:
+  contents: read
+concurrency:
+  group: toilet-batch-production
+  cancel-in-progress: false
+jobs:
+  operate:
+    if: github.repository == 'toilet-project/toilet-batch' && github.ref == 'refs/heads/main' && inputs.expected_commit == github.sha
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Validate operation
+        env:
+          EXPECTED_COMMIT: ${{ inputs.expected_commit }}
+          OPERATION: ${{ inputs.operation }}
+          APPROVED: ${{ inputs.approved }}
+          API_COMMIT: ${{ inputs.api_commit }}
+          BATCH_COMMIT: ${{ inputs.batch_commit }}
+        run: |
+          set -euo pipefail
+          test "$EXPECTED_COMMIT" = "$GITHUB_SHA"
+          case "$OPERATION" in
+            status) ;;
+            configure|publish)
+              test "$APPROVED" = true
+              [[ "$API_COMMIT" =~ ^[a-f0-9]{40}$ ]]
+              [[ "$BATCH_COMMIT" =~ ^[a-f0-9]{40}$ ]]
+              ;;
+            *) exit 1 ;;
+          esac
+          python3 -B -m unittest discover -s scripts/mobile-data -p 'test_*.py'
+      - name: Prepare pinned Tunnel client
+        run: |
+          set -euo pipefail
+          umask 077
+          curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' --tlsv1.2 \
+            --connect-timeout 10 --max-time 60 \
+            https://github.com/cloudflare/cloudflared/releases/download/2026.8.3/cloudflared-linux-amd64.deb \
+            -o "$RUNNER_TEMP/cloudflared.deb"
+          printf '%s  %s\n' 660b348d473bba81997445b534e7eaefaf4c4e16331866922326c338a7013dd9 "$RUNNER_TEMP/cloudflared.deb" | sha256sum -c -
+          dpkg-deb --extract "$RUNNER_TEMP/cloudflared.deb" "$RUNNER_TEMP/cloudflared-package"
+      - name: Operate approved batch over pinned SSH
+        env:
+          TUNNEL_SERVICE_TOKEN_ID: ${{ secrets.TUNNEL_DEPLOY_ACCESS_CLIENT_ID }}
+          TUNNEL_SERVICE_TOKEN_SECRET: ${{ secrets.TUNNEL_DEPLOY_ACCESS_CLIENT_SECRET }}
+          DEPLOY_SSH_KEY: ${{ secrets.MINI_PC_KEY }}
+          TUNNEL_KNOWN_HOSTS: ${{ secrets.TUNNEL_DEPLOY_SSH_KNOWN_HOSTS }}
+          TUNNEL_SSH_HOST: ${{ vars.TUNNEL_DEPLOY_SSH_HOST }}
+          TUNNEL_SSH_USER: ${{ secrets.MINI_PC_USERNAME }}
+          MOBILE_CATALOG_PUBLISH_TOKEN: ${{ secrets.MOBILE_CATALOG_PUBLISH_TOKEN }}
+          OPERATION: ${{ inputs.operation }}
+          APPROVED: ${{ inputs.approved }}
+          REGISTER_BASELINE: ${{ inputs.register_baseline }}
+          API_COMMIT: ${{ inputs.api_commit }}
+          BATCH_COMMIT: ${{ inputs.batch_commit }}
+        run: |
+          set -euo pipefail
+          umask 077
+          test "$TUNNEL_SSH_HOST" = ssh-deploy.geupddong.com
+          [[ "$TUNNEL_SSH_USER" =~ ^[a-z_][a-z0-9_-]*$ ]]
+          : "${TUNNEL_SERVICE_TOKEN_ID:?missing Access ID}"
+          : "${TUNNEL_SERVICE_TOKEN_SECRET:?missing Access secret}"
+          printf '%s\n' "$DEPLOY_SSH_KEY" > "$RUNNER_TEMP/catalog-key"
+          printf '%s\n' "$TUNNEL_KNOWN_HOSTS" > "$RUNNER_TEMP/catalog-hosts"
+          ssh-keygen -y -P '' -f "$RUNNER_TEMP/catalog-key" >/dev/null
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          config = dict(operation=os.environ['OPERATION'], approved=os.environ['APPROVED']=='true',
+                        api_commit=os.environ['API_COMMIT'], batch_commit=os.environ['BATCH_COMMIT'],
+                        register_baseline=os.environ['REGISTER_BASELINE']=='true')
+          if config['operation']=='configure': config['publish_token']=os.environ['MOBILE_CATALOG_PUBLISH_TOKEN']
+          source = 'import json, types\nCONFIG = json.loads(' + repr(json.dumps(config)) + ')\n'
+          source += 'resume = types.ModuleType("catalog_resume")\n'
+          source += 'exec(compile(' + repr(Path('scripts/account_resume_transition.py').read_text()) + ', "resume", "exec"), resume.__dict__)\n'
+          source += Path('scripts/mobile-data/operate.py').read_text()
+          Path(os.environ['RUNNER_TEMP'], 'catalog-operation.py').write_text(source)
+          PY
+          export PATH="$RUNNER_TEMP/cloudflared-package/usr/bin:$PATH"
+          timeout 25m ssh -F /dev/null -T -i "$RUNNER_TEMP/catalog-key" \
+            -o IdentitiesOnly=yes -o BatchMode=yes -o PasswordAuthentication=no \
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$RUNNER_TEMP/catalog-hosts" \
+            -o HostKeyAlias=geupddong-mini-pc -o HostKeyAlgorithms=ssh-ed25519 \
+            -o ForwardAgent=no -o ClearAllForwardings=yes \
+            -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=3 \
+            -o 'ProxyCommand=cloudflared access ssh --hostname %h' \
+            "$TUNNEL_SSH_USER@$TUNNEL_SSH_HOST" 'python3 -B -' < "$RUNNER_TEMP/catalog-operation.py"
+      - name: Remove runner-only credentials
+        if: always()
+        run: |
+          test -n "${RUNNER_TEMP:?}"
+          rm -f -- "$RUNNER_TEMP/catalog-key" "$RUNNER_TEMP/catalog-hosts" "$RUNNER_TEMP/catalog-operation.py"
