@@ -4,6 +4,7 @@ Never print environment values, credentials, process stderr or database rows.
 """
 import json
 import re
+import traceback
 
 KEYS = ('MOBILE_CATALOG_ENABLED', 'MOBILE_CATALOG_CRON',
         'MOBILE_CATALOG_ORIGIN', 'MOBILE_CATALOG_PUBLISH_TOKEN')
@@ -44,6 +45,7 @@ def operate(config, resume):
     operation = config['operation']
     if operation == 'status':
         objects = host.capture()
+        print(json.dumps(dict(stage='captured', images={role: obj['Config']['Image'] for role, obj in objects.items()})))
         for role in ('api', 'batch'):
             resume.Host(role).healthy(objects[role])
         batch = resume.environment(objects['batch'])
@@ -108,5 +110,6 @@ if __name__ == '__main__':
     except Exception as error:
         # Subprocess exception strings can include credential-bearing stdout/stderr.
         code = str(error) if isinstance(error, ValueError) and re.fullmatch(r'[A-Z_]{1,100}', str(error)) else None
-        print(json.dumps(dict(outcome='CATALOG_OPERATION_FAILED', errorType=type(error).__name__, code=code)))
+        frames = [dict(file=f.filename, line=f.lineno, function=f.name) for f in traceback.extract_tb(error.__traceback__)]
+        print(json.dumps(dict(outcome='CATALOG_OPERATION_FAILED', errorType=type(error).__name__, code=code, frames=frames)))
         raise SystemExit(1) from None
