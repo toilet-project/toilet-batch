@@ -17,6 +17,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import traceback
 import urllib.request
 from datetime import datetime, timezone
 from html.parser import HTMLParser
@@ -455,4 +456,10 @@ if __name__ == '__main__':
     except Exception as error:
         code = str(error) if str(error).startswith('ACCOUNT_RESUME_') and re.fullmatch(r'[A-Z_]+', str(error)) else 'ACCOUNT_RESUME_HELD'
         print(code + ' detailsSuppressed=true', file=sys.stderr)
+        cause = error
+        for _ in range(4):
+            frames = [dict(file=f.filename, line=f.lineno, function=f.name) for f in traceback.extract_tb(cause.__traceback__)]
+            print(json.dumps(dict(errorType=type(cause).__name__, frames=frames)), file=sys.stderr)
+            cause = cause.__context__
+            if cause is None: break
         raise SystemExit(1)
