@@ -78,6 +78,15 @@ def check_render(original, candidate, service, token):
     require(candidate == expected, 'CHECKPOINT_TOKEN_COMPOSE_DRIFT')
 
 
+def normalized_host_config(value):
+    result = copy.deepcopy(value)
+    # Compose may enumerate bind specifications in a different order on recreation.
+    # Preserve every specification and duplicate; actual Mounts are compared separately.
+    if isinstance(result.get('Binds'), list):
+        result['Binds'] = sorted(result['Binds'])
+    return result
+
+
 def apply_pair(hosts, originals, candidates, before, after, rollback_allowed=True):
     """All config files first, then same-image recreates; restore both on a known failure."""
     before()
@@ -219,7 +228,9 @@ def run(token, operation, commits):
                 require(resume.read_owned(item.root / '.account-lifecycle.env', private=True) == candidates[role])
                 require(current[role]['Image'] == initial[role]['Image'])
                 require(current[role]['Config']['Image'] == initial[role]['Config']['Image'])
-                require(current[role]['HostConfig'] == initial[role]['HostConfig'])
+                require(normalized_host_config(current[role]['HostConfig'])
+                        == normalized_host_config(initial[role]['HostConfig']),
+                        'CHECKPOINT_TOKEN_DOCKER_CONFIGURATION_CHANGED')
                 require(current[role]['Mounts'] == initial[role]['Mounts'])
                 require(resume.environment(current[role]) == resume.environment(initial[role]) | {KEY: token})
                 require(resume.phase_of(resume.environment(current[role])) == phases[role])

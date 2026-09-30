@@ -35,6 +35,16 @@ class RotationTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             rotation.check_render(before, after, 'api', NEW)
 
+    def test_host_bind_order_is_not_a_config_change_but_permissions_are(self):
+        original = {'Binds': ['/a:/a:rw', '/b:/b:ro'], 'Privileged': False}
+        reordered = {'Binds': ['/b:/b:ro', '/a:/a:rw'], 'Privileged': False}
+        self.assertEqual(rotation.normalized_host_config(original), rotation.normalized_host_config(reordered))
+        self.assertEqual(original['Binds'], ['/a:/a:rw', '/b:/b:ro'])
+        reordered['Binds'][0] = '/b:/b:rw'
+        self.assertNotEqual(rotation.normalized_host_config(original), rotation.normalized_host_config(reordered))
+        reordered = copy.deepcopy(original) | {'Privileged': True}
+        self.assertNotEqual(rotation.normalized_host_config(original), rotation.normalized_host_config(reordered))
+
     def pair(self, fail_restart=False, external_edit=False):
         originals = {r: (rotation.KEY + "='" + OLD + "'\n").encode() for r in rotation.ROLES}
         candidates = {r: v.replace(OLD.encode(), NEW.encode()) for r, v in originals.items()}
