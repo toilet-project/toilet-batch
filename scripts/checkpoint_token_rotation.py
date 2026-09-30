@@ -108,8 +108,40 @@ def apply_pair(hosts, originals, candidates, before, after):
         raise RuntimeError('CHECKPOINT_TOKEN_FAILED_ORIGINAL_RESTORED') from None
 
 
+def diagnose(token):
+    result = {}
+    hosts = {role: resume.Host(role) for role in ROLES}
+    objects = hosts['batch'].capture()
+    for role in ROLES:
+        host, obj = hosts[role], objects[role]
+        env = resume.environment(obj)
+        file_env = resume.parse_env(resume.read_owned(host.root / '.account-lifecycle.env', private=True))
+        try:
+            host.healthy(obj)
+            healthy = True
+        except Exception:
+            healthy = False
+        logs = host.run(['docker', 'logs', '--tail', '250', 'toilet-' + role])
+        # Whitelisted error classes/constants only. Raw application output is never forwarded.
+        exceptions = sorted(set(re.findall(r'\b([A-Z][A-Za-z]+(?:Exception|Error))\b', logs)))
+        codes = sorted(set(re.findall(r'\b(?:ERASURE|ACCOUNT|CHECKPOINT)_[A-Z_]{3,80}\b', logs)))
+        placeholders = sorted(set(re.findall(r"Could not resolve placeholder '([A-Z][A-Z0-9_]*)'", logs)))
+        result[role] = {
+            'running': obj['State']['Running'], 'restarting': obj['State']['Restarting'],
+            'oomKilled': obj['State']['OOMKilled'], 'exitCode': obj['State']['ExitCode'],
+            'startedAt': obj['State']['StartedAt'], 'healthy': healthy,
+            'imageCommit': obj['Config']['Image'].rsplit(':', 1)[-1],
+            'candidateMatchesRuntime': env.get(KEY) == token,
+            'candidateMatchesFile': file_env.get(KEY) == token,
+            'fileMatchesRuntime': all(env.get(k) == v for k, v in file_env.items()),
+            'exceptionTypes': exceptions, 'errorCodes': codes, 'missingPlaceholders': placeholders}
+    return {'outcome': 'CHECKPOINT_TOKEN_DIAGNOSE', 'services': result}
+
+
 def run(token, operation, commits):
-    require(operation in ('check', 'apply', 'verify'))
+    require(operation in ('check', 'apply', 'verify', 'diagnose'))
+    if operation == 'diagnose':
+        return diagnose(token)
     expires, revision = probe(token)
     hosts = {role: resume.Host(role) for role in ROLES}
     host = hosts['batch']
@@ -203,9 +235,14 @@ def entry(payload):
             code = 'CHECKPOINT_TOKEN_ROTATION_HELD'
         print(code + ' detailsSuppressed=true', file=sys.stderr)
         # Source locations only; no exception messages, locals, source text or credentials.
-        for frame in traceback.extract_tb(error.__traceback__):
-            filename = frame.filename.replace('\\', '/').rsplit('/', 1)[-1]
-            if filename in ('account_resume_transition.py', 'checkpoint_token_rotation.py'):
-                print('CHECKPOINT_TOKEN_LOCATION ' + json.dumps({
-                    'file': filename, 'line': frame.lineno, 'function': frame.name}), file=sys.stderr)
+        cause = error
+        for _ in range(5):
+            for frame in traceback.extract_tb(cause.__traceback__):
+                filename = frame.filename.replace('\\', '/').rsplit('/', 1)[-1]
+                if filename in ('account_resume_transition.py', 'checkpoint_token_rotation.py'):
+                    print('CHECKPOINT_TOKEN_LOCATION ' + json.dumps({
+                        'file': filename, 'line': frame.lineno, 'function': frame.name}), file=sys.stderr)
+            cause = cause.__context__
+            if cause is None:
+                break
         raise SystemExit(1)

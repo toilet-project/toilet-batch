@@ -13,7 +13,7 @@ BOOTSTRAP = "import json,sys,types;p=json.load(sys.stdin);m=types.ModuleType('ac
 
 def main():
     operation = os.environ['ROTATION_OPERATION']
-    rotation.require(operation in ('check', 'apply', 'verify', 'probe'))
+    rotation.require(operation in ('check', 'apply', 'verify', 'probe', 'diagnose'))
     token = os.environ[rotation.KEY]
     rotation.validate_token(token)
     if operation == 'probe':
@@ -66,8 +66,9 @@ def main():
                         print(json.dumps(location), file=sys.stderr)
             raise SystemExit(1)
         summary = json.loads(result.stdout)
-        allowed = {'outcome', 'expiresAtUtc', 'runtimeMatches', 'apiCommit', 'batchCommit',
-                   'accountPhases', 'credentialOnly'}
+        allowed = ({'outcome', 'services'} if operation == 'diagnose' else
+                   {'outcome', 'expiresAtUtc', 'runtimeMatches', 'apiCommit', 'batchCommit',
+                    'accountPhases', 'credentialOnly'})
         rotation.require(set(summary) == allowed)
         print(json.dumps(summary))
     finally:
