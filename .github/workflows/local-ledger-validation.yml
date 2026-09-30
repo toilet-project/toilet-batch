@@ -24,7 +24,9 @@ jobs:
       - name: Local preparation config and candidate generation
         run: node --test scripts/prepare-account-lifecycle.test.mjs scripts/prepare-local-ledger.test.mjs scripts/render-local-deployment.test.mjs scripts/render-maintenance-deployment.test.mjs scripts/us-ledger-preparation.test.mjs scripts/prepare-local-resume.test.mjs
       - name: Preflight guards without production access
-        run: python3 -m unittest discover -s scripts -p test_local_ledger_preflight.py
+        run: |
+          python3 -m unittest discover -s scripts -p test_local_ledger_preflight.py
+          python3 -B -m unittest discover -s scripts -p test_checkpoint_token_rotation.py
       - name: Require isolated Docker for full regression
         # Includes real Linux atomic replace/fsync/rollback fixtures, with synthetic files only.
         run: |
