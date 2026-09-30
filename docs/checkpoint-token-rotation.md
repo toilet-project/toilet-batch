@@ -34,3 +34,25 @@ If verification fails, both original configurations are restored and services re
 An unexpected concurrent edit is never overwritten. A terminated process/SSH connection
 can leave a partial rotation; retain the new repository secret and inspect runtime state.
 A revoked original token cannot become valid by restoring its former configuration.
+
+## Regenerated tokens and startup dependencies
+
+The API's review-unlink journal verifies `review-anonymization-v1` during startup.
+Regenerating the PAT invalidates the old credential, so restoring that value can
+prevent API startup. Both account-main and review references must be readable by
+the candidate. Original credentials returning HTTP 401 are never rollback targets;
+retain the valid replacement and inspect before proceeding.
+
+The `recover` operation is tightly limited to a revoked original, a healthy batch,
+matching dotenv/runtime configurations, the exact running images, and API startup
+failure in `reviewUnlinkJournal`. It is allowed only from the batch repository at
+`CHECKPOINT_TOKEN_ROTATION_APPROVED_SHA`. All other cases require investigation.
+`diagnose` reads health and credential-equality booleans, and extracts only known
+error classes/bean names; it does not forward raw application logs. Non-main
+diagnostics require `CHECKPOINT_TOKEN_DIAGNOSTIC_SHA` to match the exact source.
+Clear both temporary pins when done.
+
+Docker bind enumeration order is normalized while preserving all specifications,
+duplicates, mount permissions and every other HostConfig field. Actual mounts,
+Compose configuration, image IDs and complete application environments are still
+compared. Unexpected configuration differences remain a failure.

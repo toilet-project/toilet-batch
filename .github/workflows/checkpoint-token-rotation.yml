@@ -5,7 +5,7 @@ on:
       operation:
         description: Check first; apply updates only both runtime checkpoint credentials
         type: choice
-        options: [probe, check, apply, verify]
+        options: [probe, check, apply, verify, diagnose, recover]
         default: probe
       api_commit:
         description: Expected currently running API commit (required for host operations)
@@ -48,9 +48,11 @@ concurrency:
 jobs:
   rotate:
     if: >-
-      github.ref == 'refs/heads/main' &&
+      (github.ref == 'refs/heads/main' ||
+       (inputs.operation == 'diagnose' && vars.CHECKPOINT_TOKEN_DIAGNOSTIC_SHA == github.sha) ||
+       (inputs.operation == 'recover' && vars.CHECKPOINT_TOKEN_ROTATION_APPROVED_SHA == github.sha)) &&
       (github.repository == 'toilet-project/toilet-batch' || github.repository == 'toilet-project/toilet-api') &&
-      (inputs.operation != 'apply' ||
+      ((inputs.operation != 'apply' && inputs.operation != 'recover') ||
        (github.repository == 'toilet-project/toilet-batch' && vars.CHECKPOINT_TOKEN_ROTATION_APPROVED_SHA == github.sha))
     runs-on: ubuntu-latest
     timeout-minutes: 15

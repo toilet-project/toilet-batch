@@ -35,6 +35,16 @@ class RotationTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             rotation.check_render(before, after, 'api', NEW)
 
+    def test_host_bind_order_is_not_a_config_change_but_permissions_are(self):
+        original = {'Binds': ['/a:/a:rw', '/b:/b:ro'], 'Privileged': False}
+        reordered = {'Binds': ['/b:/b:ro', '/a:/a:rw'], 'Privileged': False}
+        self.assertEqual(rotation.normalized_host_config(original), rotation.normalized_host_config(reordered))
+        self.assertEqual(original['Binds'], ['/a:/a:rw', '/b:/b:ro'])
+        reordered['Binds'][0] = '/b:/b:rw'
+        self.assertNotEqual(rotation.normalized_host_config(original), rotation.normalized_host_config(reordered))
+        reordered = copy.deepcopy(original) | {'Privileged': True}
+        self.assertNotEqual(rotation.normalized_host_config(original), rotation.normalized_host_config(reordered))
+
     def pair(self, fail_restart=False, external_edit=False):
         originals = {r: (rotation.KEY + "='" + OLD + "'\n").encode() for r in rotation.ROLES}
         candidates = {r: v.replace(OLD.encode(), NEW.encode()) for r, v in originals.items()}
@@ -83,6 +93,16 @@ class RotationTest(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, '^CHECKPOINT_TOKEN_ROLLBACK_UNVERIFIED$'):
                 rotation.apply_pair(hosts, old, new, lambda: None, lambda: None)
         self.assertEqual(files[hosts['api'].root / '.account-lifecycle.env'], b'external edit')
+
+    def test_revoked_original_is_never_restored_over_valid_candidate(self):
+        hosts, old, new, files, events = self.pair(fail_restart=True)
+        with patch.object(rotation.resume, 'read_owned', side_effect=lambda p, **kw: files[p]), \
+             patch.object(rotation.resume, 'atomic_replace', side_effect=lambda p, v: files.__setitem__(p, v)):
+            with self.assertRaisesRegex(RuntimeError, '^CHECKPOINT_TOKEN_NEW_CREDENTIAL_RETAINED_RECHECK_REQUIRED$'):
+                rotation.apply_pair(hosts, old, new, lambda: None, lambda: None, rollback_allowed=False)
+        for role in rotation.ROLES:
+            self.assertEqual(files[hosts[role].root / '.account-lifecycle.env'], new[role])
+        self.assertEqual(events, ['batch', 'api'])
 
     def test_failure_output_does_not_expose_secret_or_exception(self):
         from contextlib import redirect_stderr

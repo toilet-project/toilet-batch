@@ -10,6 +10,7 @@ import re
 import sys
 import traceback
 import urllib.request
+import urllib.error
 
 import account_resume_transition as resume
 
@@ -77,7 +78,16 @@ def check_render(original, candidate, service, token):
     require(candidate == expected, 'CHECKPOINT_TOKEN_COMPOSE_DRIFT')
 
 
-def apply_pair(hosts, originals, candidates, before, after):
+def normalized_host_config(value):
+    result = copy.deepcopy(value)
+    # Compose may enumerate bind specifications in a different order on recreation.
+    # Preserve every specification and duplicate; actual Mounts are compared separately.
+    if isinstance(result.get('Binds'), list):
+        result['Binds'] = sorted(result['Binds'])
+    return result
+
+
+def apply_pair(hosts, originals, candidates, before, after, rollback_allowed=True):
     """All config files first, then same-image recreates; restore both on a known failure."""
     before()
     written = []
@@ -91,6 +101,10 @@ def apply_pair(hosts, originals, candidates, before, after):
             hosts[role].restart()
         after()
     except Exception:
+        if not rollback_allowed:
+            # A regenerated/revoked credential cannot restore a startup GitHub dependency.
+            # Retain the valid candidate; inspect state instead of restoring a known 401 token.
+            raise RuntimeError('CHECKPOINT_TOKEN_NEW_CREDENTIAL_RETAINED_RECHECK_REQUIRED') from None
         try:
             # Never overwrite an unrelated concurrent edit. Validate ALL files before rollback.
             for role in ROLES:
@@ -108,19 +122,77 @@ def apply_pair(hosts, originals, candidates, before, after):
         raise RuntimeError('CHECKPOINT_TOKEN_FAILED_ORIGINAL_RESTORED') from None
 
 
+def diagnose(token):
+    result = {}
+    hosts = {role: resume.Host(role) for role in ROLES}
+    objects = hosts['batch'].capture()
+    for role in ROLES:
+        host, obj = hosts[role], objects[role]
+        env = resume.environment(obj)
+        file_env = resume.parse_env(resume.read_owned(host.root / '.account-lifecycle.env', private=True))
+        try:
+            host.healthy(obj)
+            healthy = True
+        except Exception:
+            healthy = False
+        logs = host.run(['docker', 'logs', '--tail', '250', 'toilet-' + role])
+        # Whitelisted error classes/constants only. Raw application output is never forwarded.
+        exceptions = sorted(set(re.findall(r'\b([A-Z][A-Za-z]+(?:Exception|Error))\b', logs)))
+        codes = sorted(set(re.findall(r'\b(?:ERASURE|ACCOUNT|CHECKPOINT)_[A-Z_]{3,80}\b', logs)))
+        placeholders = sorted(set(re.findall(r"Could not resolve placeholder '([A-Z][A-Z0-9_]*)'", logs)))
+        beans = sorted(set(re.findall(r"Error creating bean with name '([A-Za-z][A-Za-z0-9_]*)'", logs)))
+        known_messages = ('Invalid profile photo storage configuration', 'Photo storage unavailable',
+                          'JWT_SECRET 환경변수가 필요합니다.', 'JWT_SECRET은 Base64 형식이어야 합니다.',
+                          'JWT_SECRET은 최소 32바이트여야 합니다.', 'Permission denied', 'Address already in use')
+        result[role] = {
+            'running': obj['State']['Running'], 'restarting': obj['State']['Restarting'],
+            'oomKilled': obj['State']['OOMKilled'], 'exitCode': obj['State']['ExitCode'],
+            'startedAt': obj['State']['StartedAt'], 'healthy': healthy,
+            'imageCommit': obj['Config']['Image'].rsplit(':', 1)[-1],
+            'candidateMatchesRuntime': env.get(KEY) == token,
+            'candidateMatchesFile': file_env.get(KEY) == token,
+            'fileMatchesRuntime': all(env.get(k) == v for k, v in file_env.items()),
+            'exceptionTypes': exceptions, 'errorCodes': codes, 'missingPlaceholders': placeholders,
+            'failedBeans': beans, 'knownErrors': [message for message in known_messages if message in logs]}
+    return {'outcome': 'CHECKPOINT_TOKEN_DIAGNOSE', 'services': result}
+
+
 def run(token, operation, commits):
-    require(operation in ('check', 'apply', 'verify'))
+    require(operation in ('check', 'apply', 'verify', 'diagnose', 'recover'))
+    if operation == 'diagnose':
+        return diagnose(token)
     expires, revision = probe(token)
+    # API startup independently reads this review checkpoint branch as well as account main.
+    review, _ = github_get(token, '/git/ref/heads/review-anonymization-v1')
+    require(re.fullmatch(r'[a-f0-9]{40}', review.get('object', {}).get('sha', '')))
     hosts = {role: resume.Host(role) for role in ROLES}
     host = hosts['batch']
     with host.context.maintenance_lease.acquire():
         initial = host.capture()
         resume.validate_step(initial, 'batch', 'preserve', commits)
+        old_authorized = True
+        for role in ROLES:
+            try:
+                github_get(resume.environment(initial[role])[KEY])
+            except urllib.error.HTTPError as error:
+                require(error.code == 401, 'CHECKPOINT_TOKEN_OLD_ACCESS_UNCERTAIN')
+                old_authorized = False
+        if operation == 'recover':
+            require(not old_authorized, 'CHECKPOINT_TOKEN_RECOVERY_REQUIRES_REVOKED_ORIGINAL')
+            diagnostic = diagnose(token)['services']
+            require(diagnostic['batch']['healthy'] and
+                    diagnostic['api']['failedBeans'] == ['reviewUnlinkJournal'] and
+                    all(diagnostic[role]['fileMatchesRuntime'] for role in ROLES),
+                    'CHECKPOINT_TOKEN_RECOVERY_STATE_REJECTED')
+            # Diagnostics may span a restart; pin the current running container snapshot anew.
+            initial = host.capture()
+            resume.validate_step(initial, 'batch', 'preserve', commits)
         phases = {role: resume.phase_of(resume.environment(initial[role])) for role in ROLES}
         originals, candidates, compose, base, renders = {}, {}, {}, {}, {}
         for role in ROLES:
             item = hosts[role]
-            item.healthy(initial[role])
+            if operation != 'recover' or role != 'api':
+                item.healthy(initial[role])
             originals[role] = resume.read_owned(item.root / '.account-lifecycle.env', private=True)
             candidates[role] = replacement(originals[role], resume.environment(initial[role]), token)
             compose[role] = resume.read_owned(item.compose)
@@ -156,7 +228,9 @@ def run(token, operation, commits):
                 require(resume.read_owned(item.root / '.account-lifecycle.env', private=True) == candidates[role])
                 require(current[role]['Image'] == initial[role]['Image'])
                 require(current[role]['Config']['Image'] == initial[role]['Config']['Image'])
-                require(current[role]['HostConfig'] == initial[role]['HostConfig'])
+                require(normalized_host_config(current[role]['HostConfig'])
+                        == normalized_host_config(initial[role]['HostConfig']),
+                        'CHECKPOINT_TOKEN_DOCKER_CONFIGURATION_CHANGED')
                 require(current[role]['Mounts'] == initial[role]['Mounts'])
                 require(resume.environment(current[role]) == resume.environment(initial[role]) | {KEY: token})
                 require(resume.phase_of(resume.environment(current[role])) == phases[role])
@@ -169,7 +243,7 @@ def run(token, operation, commits):
 
         matched = all(resume.environment(initial[role]).get(KEY) == token for role in ROLES)
         before()
-        if operation == 'apply' and not matched:
+        if operation in ('apply', 'recover') and not matched:
             # Validate both changed Compose renders before recreating either service.
             original_restart = {}
             for role in ROLES:
@@ -183,9 +257,9 @@ def run(token, operation, commits):
                         check_render(renders[target], rendered, hosts[target].service, target_values[KEY])
                     original_restart[role]()
                 hosts[role].restart = restart_checked
-            apply_pair(hosts, originals, candidates, before, after)
+            apply_pair(hosts, originals, candidates, before, after, rollback_allowed=old_authorized)
             matched = True
-        elif operation == 'verify' or (operation == 'apply' and matched):
+        elif operation == 'verify' or (operation in ('apply', 'recover') and matched):
             require(matched, 'CHECKPOINT_TOKEN_RUNTIME_NOT_UPDATED')
             after()
     return {'outcome': 'CHECKPOINT_TOKEN_' + operation.upper() + '_PASS',
@@ -203,9 +277,14 @@ def entry(payload):
             code = 'CHECKPOINT_TOKEN_ROTATION_HELD'
         print(code + ' detailsSuppressed=true', file=sys.stderr)
         # Source locations only; no exception messages, locals, source text or credentials.
-        for frame in traceback.extract_tb(error.__traceback__):
-            filename = frame.filename.replace('\\', '/').rsplit('/', 1)[-1]
-            if filename in ('account_resume_transition.py', 'checkpoint_token_rotation.py'):
-                print('CHECKPOINT_TOKEN_LOCATION ' + json.dumps({
-                    'file': filename, 'line': frame.lineno, 'function': frame.name}), file=sys.stderr)
+        cause = error
+        for _ in range(5):
+            for frame in traceback.extract_tb(cause.__traceback__):
+                filename = frame.filename.replace('\\', '/').rsplit('/', 1)[-1]
+                if filename in ('account_resume_transition.py', 'checkpoint_token_rotation.py'):
+                    print('CHECKPOINT_TOKEN_LOCATION ' + json.dumps({
+                        'file': filename, 'line': frame.lineno, 'function': frame.name}), file=sys.stderr)
+            cause = cause.__context__
+            if cause is None:
+                break
         raise SystemExit(1)
