@@ -84,6 +84,16 @@ class RotationTest(unittest.TestCase):
                 rotation.apply_pair(hosts, old, new, lambda: None, lambda: None)
         self.assertEqual(files[hosts['api'].root / '.account-lifecycle.env'], b'external edit')
 
+    def test_revoked_original_is_never_restored_over_valid_candidate(self):
+        hosts, old, new, files, events = self.pair(fail_restart=True)
+        with patch.object(rotation.resume, 'read_owned', side_effect=lambda p, **kw: files[p]), \
+             patch.object(rotation.resume, 'atomic_replace', side_effect=lambda p, v: files.__setitem__(p, v)):
+            with self.assertRaisesRegex(RuntimeError, '^CHECKPOINT_TOKEN_NEW_CREDENTIAL_RETAINED_RECHECK_REQUIRED$'):
+                rotation.apply_pair(hosts, old, new, lambda: None, lambda: None, rollback_allowed=False)
+        for role in rotation.ROLES:
+            self.assertEqual(files[hosts[role].root / '.account-lifecycle.env'], new[role])
+        self.assertEqual(events, ['batch', 'api'])
+
     def test_failure_output_does_not_expose_secret_or_exception(self):
         from contextlib import redirect_stderr
         from io import StringIO

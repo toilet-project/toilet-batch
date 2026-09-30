@@ -13,7 +13,7 @@ BOOTSTRAP = "import json,sys,types;p=json.load(sys.stdin);m=types.ModuleType('ac
 
 def main():
     operation = os.environ['ROTATION_OPERATION']
-    rotation.require(operation in ('check', 'apply', 'verify', 'probe', 'diagnose'))
+    rotation.require(operation in ('check', 'apply', 'verify', 'probe', 'diagnose', 'recover'))
     token = os.environ[rotation.KEY]
     rotation.validate_token(token)
     if operation == 'probe':
