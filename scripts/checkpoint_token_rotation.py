@@ -126,6 +126,10 @@ def diagnose(token):
         exceptions = sorted(set(re.findall(r'\b([A-Z][A-Za-z]+(?:Exception|Error))\b', logs)))
         codes = sorted(set(re.findall(r'\b(?:ERASURE|ACCOUNT|CHECKPOINT)_[A-Z_]{3,80}\b', logs)))
         placeholders = sorted(set(re.findall(r"Could not resolve placeholder '([A-Z][A-Z0-9_]*)'", logs)))
+        beans = sorted(set(re.findall(r"Error creating bean with name '([A-Za-z][A-Za-z0-9_]*)'", logs)))
+        known_messages = ('Invalid profile photo storage configuration', 'Photo storage unavailable',
+                          'JWT_SECRET 환경변수가 필요합니다.', 'JWT_SECRET은 Base64 형식이어야 합니다.',
+                          'JWT_SECRET은 최소 32바이트여야 합니다.', 'Permission denied', 'Address already in use')
         result[role] = {
             'running': obj['State']['Running'], 'restarting': obj['State']['Restarting'],
             'oomKilled': obj['State']['OOMKilled'], 'exitCode': obj['State']['ExitCode'],
@@ -134,7 +138,8 @@ def diagnose(token):
             'candidateMatchesRuntime': env.get(KEY) == token,
             'candidateMatchesFile': file_env.get(KEY) == token,
             'fileMatchesRuntime': all(env.get(k) == v for k, v in file_env.items()),
-            'exceptionTypes': exceptions, 'errorCodes': codes, 'missingPlaceholders': placeholders}
+            'exceptionTypes': exceptions, 'errorCodes': codes, 'missingPlaceholders': placeholders,
+            'failedBeans': beans, 'knownErrors': [message for message in known_messages if message in logs]}
     return {'outcome': 'CHECKPOINT_TOKEN_DIAGNOSE', 'services': result}
 
 
