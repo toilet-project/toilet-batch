@@ -53,8 +53,17 @@ def main():
         # Only accept the deliberately minimal JSON result. Never forward raw SSH output.
         if result.returncode:
             safe = re.findall(r'CHECKPOINT_TOKEN_[A-Z_]+', result.stderr)
-            print((safe[-1] if safe else 'CHECKPOINT_TOKEN_TRANSPORT_OR_SERVER_FAILED')
+            safe = [value for value in safe if value != 'CHECKPOINT_TOKEN_LOCATION']
+            print((safe[0] if safe else 'CHECKPOINT_TOKEN_TRANSPORT_OR_SERVER_FAILED')
                   + ' detailsSuppressed=true', file=sys.stderr)
+            for line in result.stderr.splitlines():
+                if line.startswith('CHECKPOINT_TOKEN_LOCATION '):
+                    location = json.loads(line.removeprefix('CHECKPOINT_TOKEN_LOCATION '))
+                    if (set(location) == {'file', 'line', 'function'}
+                            and location['file'] in ('account_resume_transition.py', 'checkpoint_token_rotation.py')
+                            and isinstance(location['line'], int)
+                            and re.fullmatch(r'[A-Za-z_][A-Za-z_0-9]*', location['function'])):
+                        print(json.dumps(location), file=sys.stderr)
             raise SystemExit(1)
         summary = json.loads(result.stdout)
         allowed = {'outcome', 'expiresAtUtc', 'runtimeMatches', 'apiCommit', 'batchCommit',

@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 import json
 import re
 import sys
+import traceback
 import urllib.request
 
 import account_resume_transition as resume
@@ -201,4 +202,10 @@ def entry(payload):
         if not re.fullmatch(r'CHECKPOINT_TOKEN_[A-Z_]+', code):
             code = 'CHECKPOINT_TOKEN_ROTATION_HELD'
         print(code + ' detailsSuppressed=true', file=sys.stderr)
+        # Source locations only; no exception messages, locals, source text or credentials.
+        for frame in traceback.extract_tb(error.__traceback__):
+            filename = frame.filename.replace('\\', '/').rsplit('/', 1)[-1]
+            if filename in ('account_resume_transition.py', 'checkpoint_token_rotation.py'):
+                print('CHECKPOINT_TOKEN_LOCATION ' + json.dumps({
+                    'file': filename, 'line': frame.lineno, 'function': frame.name}), file=sys.stderr)
         raise SystemExit(1)
