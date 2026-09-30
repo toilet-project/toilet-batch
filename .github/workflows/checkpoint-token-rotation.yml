@@ -1,0 +1,97 @@
+name: Checkpoint token rotation
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: Check first; apply updates only both runtime checkpoint credentials
+        type: choice
+        options: [probe, check, apply, verify]
+        default: probe
+      api_commit:
+        description: Expected currently running API commit (required for host operations)
+        type: string
+      batch_commit:
+        description: Expected currently running batch commit (required for host operations)
+        type: string
+  workflow_call:
+    inputs:
+      operation:
+        type: string
+        default: probe
+      api_commit:
+        type: string
+        default: ''
+      batch_commit:
+        type: string
+        default: ''
+      tools_ref:
+        type: string
+        required: true
+    secrets:
+      ERASURE_CHECKPOINT_GITHUB_TOKEN:
+        required: true
+      TUNNEL_DEPLOY_ACCESS_CLIENT_ID:
+        required: false
+      TUNNEL_DEPLOY_ACCESS_CLIENT_SECRET:
+        required: false
+      MINI_PC_KEY:
+        required: false
+      TUNNEL_DEPLOY_SSH_KNOWN_HOSTS:
+        required: false
+      MINI_PC_USERNAME:
+        required: false
+permissions:
+  contents: read
+concurrency:
+  group: ${{ github.repository }}-checkpoint-token-rotation
+  cancel-in-progress: false
+jobs:
+  rotate:
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      (github.repository == 'toilet-project/toilet-batch' || github.repository == 'toilet-project/toilet-api') &&
+      (inputs.operation != 'apply' ||
+       (github.repository == 'toilet-project/toilet-batch' && vars.CHECKPOINT_TOKEN_ROTATION_APPROVED_SHA == github.sha))
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: toilet-project/toilet-batch
+          ref: ${{ inputs.tools_ref || github.sha }}
+          persist-credentials: false
+      - name: Test credential rotation guards without production access
+        run: python3 -B -m unittest discover -s scripts -p test_checkpoint_token_rotation.py
+      - name: Prepare pinned Tunnel client
+        if: inputs.operation != 'probe'
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' --tlsv1.2 \
+            --connect-timeout 10 --max-time 60 \
+            https://github.com/cloudflare/cloudflared/releases/download/2026.8.3/cloudflared-linux-amd64.deb \
+            -o "$RUNNER_TEMP/cloudflared.deb"
+          printf '%s  %s\n' 660b348d473bba81997445b534e7eaefaf4c4e16331866922326c338a7013dd9 "$RUNNER_TEMP/cloudflared.deb" | sha256sum -c -
+          dpkg-deb --extract "$RUNNER_TEMP/cloudflared.deb" "$RUNNER_TEMP/cloudflared-package"
+          printf '%s\n' "$RUNNER_TEMP/cloudflared-package/usr/bin" >> "$GITHUB_PATH"
+      - name: Validate stored checkpoint secret
+        if: inputs.operation == 'probe'
+        env:
+          ROTATION_OPERATION: probe
+          ERASURE_CHECKPOINT_GITHUB_TOKEN: ${{ secrets.ERASURE_CHECKPOINT_GITHUB_TOKEN }}
+        run: python3 -B scripts/run_checkpoint_token_rotation.py
+      - name: Verify or rotate through existing pinned SSH transport
+        if: inputs.operation != 'probe'
+        env:
+          ROTATION_OPERATION: ${{ inputs.operation }}
+          API_COMMIT: ${{ inputs.api_commit }}
+          BATCH_COMMIT: ${{ inputs.batch_commit }}
+          ERASURE_CHECKPOINT_GITHUB_TOKEN: ${{ secrets.ERASURE_CHECKPOINT_GITHUB_TOKEN }}
+          TUNNEL_SERVICE_TOKEN_ID: ${{ secrets.TUNNEL_DEPLOY_ACCESS_CLIENT_ID }}
+          TUNNEL_SERVICE_TOKEN_SECRET: ${{ secrets.TUNNEL_DEPLOY_ACCESS_CLIENT_SECRET }}
+          DEPLOY_SSH_KEY: ${{ secrets.MINI_PC_KEY }}
+          TUNNEL_KNOWN_HOSTS: ${{ secrets.TUNNEL_DEPLOY_SSH_KNOWN_HOSTS }}
+          TUNNEL_SSH_HOST: ${{ vars.TUNNEL_DEPLOY_SSH_HOST }}
+          TUNNEL_SSH_USER: ${{ secrets.MINI_PC_USERNAME }}
+        run: python3 -B scripts/run_checkpoint_token_rotation.py
