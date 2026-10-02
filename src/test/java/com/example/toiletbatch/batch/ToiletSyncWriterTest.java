@@ -118,12 +118,20 @@ public class ToiletSyncWriterTest {
         org.junit.jupiter.api.Assertions.assertNull(db.queryForObject("SELECT latitude FROM toilet WHERE mng_no='H'", BigDecimal.class));
         assertEquals("HIDDEN_DUPLICATE", db.queryForObject("SELECT visibility_status FROM toilet WHERE mng_no='H'", String.class));
         assertEquals(1L, db.queryForObject("SELECT region_revision FROM toilet WHERE mng_no='H'", Long.class));
-        assertEquals(3L, db.queryForObject("SELECT COUNT(*) FROM toilet_translation WHERE locale='ko'", Long.class));
+        db.update("INSERT INTO toilet(mng_no,name,road_address,jibun_address,visibility_status,coordinate_source) VALUES('T','임시 숨김 원본','유지 도로','유지 지번','HIDDEN_TEMPORARY','LEGACY')");
+        writer.upsertPage("execution-temporary-hidden", List.of(record("T")));
+        assertEquals("임시 숨김 원본", db.queryForObject("SELECT name FROM toilet WHERE mng_no='T'", String.class));
+        assertEquals("유지 도로", db.queryForObject("SELECT road_address FROM toilet WHERE mng_no='T'", String.class));
+        assertEquals("유지 지번", db.queryForObject("SELECT jibun_address FROM toilet WHERE mng_no='T'", String.class));
+        org.junit.jupiter.api.Assertions.assertNull(db.queryForObject("SELECT latitude FROM toilet WHERE mng_no='T'", BigDecimal.class));
+        assertEquals("HIDDEN_TEMPORARY", db.queryForObject("SELECT visibility_status FROM toilet WHERE mng_no='T'", String.class));
+        assertEquals(1L, db.queryForObject("SELECT region_revision FROM toilet WHERE mng_no='T'", Long.class));
+        assertEquals(4L, db.queryForObject("SELECT COUNT(*) FROM toilet_translation WHERE locale='ko'", Long.class));
         assertEquals("관리자 확정 지번", db.queryForObject("""
                 SELECT tr.jibun_address FROM toilet_translation tr
                 JOIN toilet t ON t.toilet_id=tr.toilet_id WHERE t.mng_no='A' AND tr.locale='ko'
                 """, String.class));
-        verify(normalized, times(3)).synchronize(anyString());
+        verify(normalized, times(4)).synchronize(anyString());
 
         // H2 reports zero for an unchanged upsert; MySQL's default JDBC connection reports the matched row.
         if (!h2) {
