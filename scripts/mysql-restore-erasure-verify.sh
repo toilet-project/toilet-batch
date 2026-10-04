@@ -101,6 +101,13 @@ elif [[ "$review_schema_count" == 2 ]]; then
 else
   fail 'partial V12 review schema'
 fi
+growth_schema_count="$(mysql_query -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='toilet_db' AND table_name IN ('growth_policy_snapshot','growth_policy_target','growth_account','growth_award','growth_xp_event','growth_review_evidence','growth_review_exclusion');")"
+if [[ "$growth_schema_count" == 7 ]]; then
+  [[ "$review_schema_count" == 2 && "${REVIEW_RESTORE_REQUIRED:-}" == true ]] || fail 'V40 backup requires review unlink replay'
+  [[ "$(java -cp "$tool_dir/lib/*" com.example.toiletbatch.account.ReviewUnlinkRestoreCli --capabilities 2>>"$work_dir/private-errors.log")" == 'review-unlink-restore growth-v1' ]] || fail 'growth-aware restore tool bundle is required'
+elif [[ "$growth_schema_count" != 0 ]]; then
+  fail 'partial V40 growth schema'
+fi
 [[ "$(mysql_query -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='toilet_db' AND table_name='erasure_restore_guard';")" == 0 ]] || fail 'unexpected pre-existing restore guard'
 phase=guard-create
 mysql_query -e "CREATE TABLE toilet_db.erasure_restore_guard(marker CHAR(32) NOT NULL PRIMARY KEY); INSERT INTO toilet_db.erasure_restore_guard VALUES('$run_id');"

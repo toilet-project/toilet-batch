@@ -19,6 +19,11 @@ public final class ReviewUnlinkRestoreCli {
     public static void main(String[] args) {
         String stage="arguments";
         try {
+            // Build/deployment probe only. It never loads settings, opens a ledger or connects to a DB.
+            if(args.length==1&&"--capabilities".equals(args[0])) {
+                Class.forName("com.geupddong.growth.GrowthUnlinkRestore",false,ReviewUnlinkRestoreCli.class.getClassLoader());
+                System.out.println("review-unlink-restore growth-v1");return;
+            }
             boolean apply=args.length==1&&"--apply".equals(args[0]);
             if(args.length>1||(args.length==1&&!apply&&!"--dry-run".equals(args[0])))throw new IllegalArgumentException();
             var env=new StandardEnvironment();
@@ -42,7 +47,7 @@ public final class ReviewUnlinkRestoreCli {
             stage="database-guard";
             if(containerIsolated){String serverUuid=env.getRequiredProperty("ERASURE_RESTORE_SERVER_UUID");
                 if(!serverUuid.matches("[a-f0-9-]{36}")||!serverUuid.equals(jdbc.queryForObject("SELECT @@server_uuid",String.class))
-                        ||!"OFF".equals(jdbc.queryForObject("SELECT @@event_scheduler",String.class))
+                        ||!schedulerDisabled(jdbc.queryForObject("SELECT @@event_scheduler",String.class))
                         ||!Integer.valueOf(0).equals(jdbc.queryForObject("SELECT @@log_bin",Integer.class)))throw new IllegalStateException();}
             if(!marker.equals(jdbc.queryForObject("SELECT marker FROM erasure_restore_guard",String.class)))throw new IllegalStateException();
             if(jdbc.queryForObject("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name IN ('toilet_review','toilet_review_submission')",Integer.class)!=2
@@ -68,4 +73,5 @@ public final class ReviewUnlinkRestoreCli {
             }
         }catch(Exception ignored){System.err.println("REVIEW_RESTORE_FAILED: "+stage);System.exit(1);}
     }
+    static boolean schedulerDisabled(String state){return "OFF".equals(state)||"DISABLED".equals(state);}
 }

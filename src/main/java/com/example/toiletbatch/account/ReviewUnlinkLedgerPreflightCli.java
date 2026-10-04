@@ -28,7 +28,8 @@ public final class ReviewUnlinkLedgerPreflightCli {
                 System.out.print(new String(genesis(epoch,Clock.systemUTC().instant()).bytes(),StandardCharsets.UTF_8));
                 return;
             }
-            if(!"--read-only".equals(args[0]) || !"approved".equals(env.getProperty("REVIEW_UNLINK_PREFLIGHT_READONLY")))
+            boolean snapshotOnly="--snapshot".equals(args[0]);
+            if((!"--read-only".equals(args[0])&&!snapshotOnly) || !"approved".equals(env.getProperty("REVIEW_UNLINK_PREFLIGHT_READONLY")))
                 throw new IllegalArgumentException();
             stage="configuration";
             if(!"LOCAL".equals(env.getRequiredProperty("ERASURE_LEDGER_PROVIDER")))throw new IllegalStateException();
@@ -37,7 +38,7 @@ public final class ReviewUnlinkLedgerPreflightCli {
             if(!DIRECTORY.equals(directory.toString()) || !ACCOUNT_DIRECTORY.equals(accountDirectory.toString())
                     || directory.startsWith(accountDirectory) || accountDirectory.startsWith(directory))throw new IllegalStateException();
             String storeId=env.getRequiredProperty("REVIEW_UNLINK_STORE_ID");
-            int expected=Integer.parseInt(env.getRequiredProperty("REVIEW_UNLINK_EXPECTED_OBJECTS"));
+            int expected=snapshotOnly?0:Integer.parseInt(env.getRequiredProperty("REVIEW_UNLINK_EXPECTED_OBJECTS"));
             if(expected<0||expected>100000)throw new IllegalStateException();
             var keys=new ObjectMapper().readValue(env.getRequiredProperty("ERASURE_LEDGER_KEYS_JSON"),new TypeReference<Map<String,String>>(){});
             stage="snapshot";
@@ -47,13 +48,23 @@ public final class ReviewUnlinkLedgerPreflightCli {
                         ReviewCheckpointStore.configured(env.getRequiredProperty("ERASURE_CHECKPOINT_GITHUB_TOKEN")),
                         Runnable::run,epoch,Clock.systemUTC())) {
                 var snapshot=journal.snapshot();
-                if(snapshot.records().size()!=expected)throw new IllegalStateException();
-                System.out.printf("REVIEW_AUTHOR_UNLINK_PREFLIGHT_PASS records=%d checkpointMatched=true localStoreVerified=true activationAllowed=false%n",expected);
+                if(snapshotOnly){
+                    System.out.println(new ObjectMapper().writeValueAsString(snapshotProof(snapshot)));
+                }else{
+                    if(snapshot.records().size()!=expected)throw new IllegalStateException();
+                    System.out.printf("REVIEW_AUTHOR_UNLINK_PREFLIGHT_PASS records=%d checkpointMatched=true localStoreVerified=true activationAllowed=false%n",expected);
+                }
             }
         } catch(Exception ignored) {
             System.err.println("REVIEW_AUTHOR_UNLINK_PREFLIGHT_FAILED stage="+stage+" detailsSuppressed=true");
             System.exit(1);
         }
+    }
+
+    static Map<String,Object> snapshotProof(ReviewUnlinkJournal.Snapshot snapshot) {
+        var checkpoint=snapshot.head().checkpoint();
+        return Map.of("outcome","REVIEW_UNLINK_SNAPSHOT_VERIFIED","records",snapshot.records().size(),
+                "checkpointSha256",checkpoint.digest(),"inventorySha256",checkpoint.inventorySha256());
     }
 
     static ErasureCheckpoint genesis(String epoch,Instant recordedAt) {

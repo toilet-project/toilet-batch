@@ -1,0 +1,71 @@
+name: Build approved standalone restore tools
+on:
+  workflow_dispatch:
+    inputs:
+      expected_commit:
+        description: Approved main source commit (40 hex)
+        type: string
+        required: true
+permissions:
+  contents: read
+concurrency:
+  group: toilet-batch-restore-tools-build
+  cancel-in-progress: false
+jobs:
+  build:
+    if: >-
+      github.repository == 'toilet-project/toilet-batch' &&
+      github.ref == 'refs/heads/main' &&
+      vars.RESTORE_TOOLS_BUILD_APPROVED == 'true' &&
+      vars.RESTORE_TOOLS_BUILD_APPROVED_SHA == github.sha &&
+      inputs.expected_commit == github.sha
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Validate pinned source
+        env:
+          EXPECTED_COMMIT: ${{ inputs.expected_commit }}
+        run: |
+          set -euo pipefail
+          [[ "$EXPECTED_COMMIT" =~ ^[a-f0-9]{40}$ ]]
+          test "$EXPECTED_COMMIT" = "$GITHUB_SHA"
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Verify and package standalone tools
+        run: |
+          set -euo pipefail
+          chmod +x gradlew
+          ./gradlew clean test installErasureTools --no-daemon --console=plain
+          test "$(java -cp 'build/erasure-tools/lib/*' com.example.toiletbatch.account.ReviewUnlinkRestoreCli --capabilities)" = 'review-unlink-restore growth-v1'
+          bash -n scripts/mysql-restore-erasure-verify.sh
+          cp scripts/mysql-restore-erasure-verify.sh build/erasure-tools/
+          cp docs/review-unlink-restore.md build/erasure-tools/
+          python3 - <<'PY'
+          import hashlib, json, os
+          from pathlib import Path
+          root = Path('build/erasure-tools')
+          files = sorted(p for p in root.rglob('*') if p.is_file())
+          manifest = {
+              'sourceCommit': os.environ['GITHUB_SHA'],
+              'capabilities': ['review-unlink-restore', 'growth-v1'],
+              'growthSchemaVersion': 40,
+              'deploymentPerformed': False,
+              'files': {p.relative_to(root).as_posix(): hashlib.sha256(p.read_bytes()).hexdigest() for p in files},
+          }
+          (root / 'manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
+          PY
+          tar -C build/erasure-tools -czf build/restore-tools-${GITHUB_SHA}.tar.gz .
+          (cd build && sha256sum restore-tools-${GITHUB_SHA}.tar.gz > restore-tools-${GITHUB_SHA}.tar.gz.sha256)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: restore-tools-${{ github.sha }}
+          path: |
+            build/restore-tools-${{ github.sha }}.tar.gz
+            build/restore-tools-${{ github.sha }}.tar.gz.sha256
+          retention-days: 30

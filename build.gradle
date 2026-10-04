@@ -85,6 +85,16 @@ tasks.register('installErasureTools', Sync) {
     from(tasks.named('jar'))
     from(configurations.runtimeClasspath.filter { !it.name.startsWith('spring-boot-devtools-') })
     into(layout.buildDirectory.dir('erasure-tools/lib'))
+    doLast {
+        def archive = tasks.named('jar').get().archiveFile.get().asFile
+        new java.util.jar.JarFile(archive).withCloseable { jar ->
+            ['com/example/toiletbatch/account/ReviewUnlinkRestoreCli.class',
+             'com/geupddong/review/ReviewUnlinkRestore.class',
+             'com/geupddong/growth/GrowthUnlinkRestore.class'].each { entry ->
+                if (jar.getJarEntry(entry) == null) throw new GradleException("Incomplete growth-aware restore bundle: ${entry}")
+            }
+        }
+    }
 }
 
 // Build-only test bundle. It never reads credentials or contacts the provider during packaging.
