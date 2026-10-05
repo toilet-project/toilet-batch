@@ -55,6 +55,8 @@ tasks.named('test') {
     }
     inputs.property('accountRetentionMySqlMarker', System.getenv('ACCOUNT_RETENTION_MYSQL_MARKER') ?: '')
     inputs.property('accountRetentionMySqlPort', System.getenv('ACCOUNT_RETENTION_MYSQL_PORT') ?: '')
+    inputs.property('batchMetadataMySqlCi', System.getenv('BATCH_METADATA_MYSQL_CI') ?: '')
+    inputs.property('batchMetadataMySqlUrl', System.getenv('BATCH_METADATA_MYSQL_URL') ?: '')
     useJUnitPlatform()
 }
 
