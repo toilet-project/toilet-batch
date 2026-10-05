@@ -10,6 +10,7 @@ import java.time.Clock;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Optional;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -48,15 +49,17 @@ class IncrementalGeocodingService {
     }
 
     List<ResolvedRestroomRecord> resolveAll(List<PublicRestroomRecord> records) {
-        return records.stream().map(this::resolve).toList();
+        Map<String, CoordinateMetadata> metadata = metadataRepository.findAllByManagementNumbers(
+                records.stream().map(PublicRestroomRecord::managementNumber).toList());
+        return records.stream().map(record -> resolve(record, metadata)).toList();
     }
 
-    private ResolvedRestroomRecord resolve(PublicRestroomRecord record) {
+    private ResolvedRestroomRecord resolve(PublicRestroomRecord record, Map<String, CoordinateMetadata> metadataByNumber) {
         if (!StringUtils.hasText(record.managementNumber())) {
             return new ResolvedRestroomRecord(record, null, null, null, null, null);
         }
 
-        Optional<CoordinateMetadata> metadata = metadataRepository.findByManagementNumber(record.managementNumber());
+        Optional<CoordinateMetadata> metadata = Optional.ofNullable(metadataByNumber.get(record.managementNumber()));
         if (metadata.filter(value -> ADMIN_CONFIRMED.equals(value.source())).isPresent()) {
             return preserve(record, metadata.orElseThrow());
         }
